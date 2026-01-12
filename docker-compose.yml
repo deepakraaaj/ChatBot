@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: ai_backend
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=mysql+aiomysql://user:password@db:3306/dev-fitss
+      - APP_ENV=development
+    depends_on:
+      - db
+    networks:
+      - ai_network
+
+  db:
+    image: mysql:8.0
+    container_name: ai_db
+    environment:
+      MYSQL_ROOT_PASSWORD: Root@12345
+      MYSQL_DATABASE: dev-fitss
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3307:3306" # Mapped to 3307 to avoid conflict with local 3306
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - ai_network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      timeout: 20s
+      retries: 10
+
+volumes:
+  db_data:
+
+
+networks:
+  ai_network:
+    driver: bridge
