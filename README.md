@@ -10,6 +10,41 @@ The backend is structured as a graph of specialized "agents" (nodes) that handle
 *   **Vector Query**: `ChromaDB` for semantic document retrieval (long-term memory/search).
 *   **Response Optimization**: Custom `TOON` (Token-Oriented Object Notation) codec to compress repetitive JSON responses by up to 70%.
 
+```mermaid
+graph TD
+    User[Frontend / User] -->|POST /chat| API[FastAPI Entrypoint]
+    User -->|POST /login| Auth[Auth Service]
+    
+    subgraph "AI Backend Core"
+        API -->|Validate Token| Security[Security Layer]
+        Security -->|Stateful Run| Graph[LangGraph Engine]
+        
+        subgraph "Agent Nodes"
+            Start((Start)) --> Understanding[Understanding Node]
+            Understanding -->|Intent: SQL| SQLNode[SQL Node]
+            Understanding -->|Intent: Workflow| WorkflowNode[Workflow Node]
+            Understanding -->|Intent: ChitChat| ReplyNode[Reply Node]
+            
+            SQLNode -->|Generate Query| LLM[LLM Router]
+            SQLNode -->|Execute| DB[(MySQL Database)]
+            
+            ReplyNode -->|RAG Search| Vector[(ChromaDB)]
+            ReplyNode -->|Generate Response| LLM
+            
+            WorkflowNode -->|Execute Step| WorkflowEngine[Workflow Engine]
+            WorkflowEngine -->|Update State| DB
+        end
+        
+        LLM -->|Primary| Groq[Groq API]
+        LLM -->|Fallback| Gemini[Gemini API]
+        LLM -->|Privacy| Local[Self-Hosted Model]
+    end
+    
+    SQLNode -->|Raw Data| TOON[TOON Codec]
+    TOON -->|Compressed JSON| API
+    ReplyNode -->|Stream| API
+```
+
 ## ✨ Key Features
 
 ### 1. Multi-Model Intelligence
