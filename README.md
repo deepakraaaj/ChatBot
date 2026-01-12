@@ -12,37 +12,66 @@ The backend is structured as a graph of specialized "agents" (nodes) that handle
 
 ```mermaid
 graph TD
-    User[Frontend / User] -->|POST /chat| API[FastAPI Entrypoint]
-    User -->|POST /login| Auth[Auth Service]
+    User((User))
     
-    subgraph "AI Backend Core"
-        API -->|Validate Token| Security[Security Layer]
-        Security -->|Stateful Run| Graph[LangGraph Engine]
+    subgraph "Backend System (FastAPI)"
+        style User fill:#ffffff,stroke:#000000,color:#000000
         
-        subgraph "Agent Nodes"
-            Start((Start)) --> Understanding[Understanding Node]
-            Understanding -->|Intent: SQL| SQLNode[SQL Node]
-            Understanding -->|Intent: Workflow| WorkflowNode[Workflow Node]
-            Understanding -->|Intent: ChitChat| ReplyNode[Reply Node]
+        Frontend[Streamlit Frontend]:::blue
+        API[API Endpoint /chat]:::green
+        
+        User <--> Frontend
+        Frontend <--> API
+        
+        subgraph "LangGraph Agent"
+            StateManager[Graph State Manager]:::green
+            Understanding[Understanding Node]:::green
+            Intent{Intent?}:::white
             
-            SQLNode -->|Generate Query| LLM[LLM Router]
-            SQLNode -->|Execute| DB[(MySQL Database)]
+            WorkflowNode[Workflow Node]:::green
+            ReplyNode[Reply Node]:::green
+            SQLPlan[SQL Planning Node]:::green
+            SQLExec[SQL Execution Node]:::green
+            WorkflowEng[Workflow Engine]:::orange
             
-            ReplyNode -->|RAG Search| Vector[(ChromaDB)]
-            ReplyNode -->|Generate Response| LLM
+            API <--> StateManager
+            StateManager --> Understanding
+            Understanding --> Intent
             
-            WorkflowNode -->|Execute Step| WorkflowEngine[Workflow Engine]
-            WorkflowEngine -->|Update State| DB
+            Intent -->|Workflow| WorkflowNode
+            Intent -->|Chat| ReplyNode
+            Intent -->|SQL| SQLPlan
+            
+            WorkflowNode --> WorkflowEng
+            WorkflowNode --> ReplyNode
+            WorkflowEng --> ReplyNode
+            
+            SQLPlan --> SQLExec
+            SQLExec --> ReplyNode
         end
         
-        LLM -->|Primary| Groq[Groq API]
-        LLM -->|Fallback| Gemini[Gemini API]
-        LLM -->|Privacy| Local[Self-Hosted Model]
+        subgraph "Services & Repositories"
+            Registry[Workflow Registry]:::orange
+            UpdateFlow[Update Task Flow]:::orange
+            SchedFlow[Scheduler Flow]:::orange
+            DB[(PostgreSQL DB)]:::purple
+            
+            WorkflowEng --> Registry
+            Registry --> UpdateFlow
+            Registry --> SchedFlow
+            
+            UpdateFlow <--> DB
+            SchedFlow <--> DB
+            SQLExec <--> DB
+        end
     end
     
-    SQLNode -->|Raw Data| TOON[TOON Codec]
-    TOON -->|Compressed JSON| API
-    ReplyNode -->|Stream| API
+    %% Styling
+    classDef blue fill:#dae8fc,stroke:#6c8ebf,color:#000000
+    classDef green fill:#d5e8d4,stroke:#82b366,color:#000000
+    classDef orange fill:#ffe6cc,stroke:#d79b00,color:#000000
+    classDef purple fill:#e1d5e7,stroke:#9673a6,color:#000000
+    classDef white fill:#ffffff,stroke:#000000,color:#000000
 ```
 
 ## ✨ Key Features
