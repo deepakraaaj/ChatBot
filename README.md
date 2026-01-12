@@ -17,7 +17,7 @@ graph TD
     subgraph "Backend System (FastAPI)"
         style User fill:#ffffff,stroke:#000000,color:#000000
         
-        Frontend[Streamlit Frontend]:::blue
+        Frontend[Client Application]:::blue
         API[API Endpoint /chat]:::green
         
         User <--> Frontend
