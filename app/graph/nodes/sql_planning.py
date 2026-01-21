@@ -41,9 +41,9 @@ class SQLPlanningNode:
             # Fetch dynamic schema
             schema_context = await SchemaService.get_schema()
             
-            chain = self.prompt | model | self.parser
+            chain = self.prompt | model
             
-            result = await chain.ainvoke({
+            response = await chain.ainvoke({
                 "history": history_str,
                 "input": last_message,
                 "schema": schema_context,
@@ -52,6 +52,28 @@ class SQLPlanningNode:
                 "company_id": company_id or "None",
                 "format_instructions": self.parser.get_format_instructions()
             })
+
+            # Check if response is string (from normal LLM) or AIMessage
+            content_str = response.content if hasattr(response, "content") else str(response)
+
+            try:
+                # Attempt 1: Direct Parse
+                result = self.parser.parse(content_str)
+            except Exception:
+                # Attempt 2: Clean and Retry
+                try:
+                    import re
+                    # Find extracted JSON between first { and last }
+                    json_match = re.search(r"(\{.*\})", content_str, re.DOTALL)
+                    if json_match:
+                         clean_json = json_match.group(1)
+                         result = self.parser.parse(clean_json)
+                    else:
+                         raise ValueError("No JSON found in response")
+                except Exception as e2:
+                    logger.error(f"Failed to parse SQL output: {content_str}")
+                    raise e2
+
             
             # Security Check
             query = result["query"]
