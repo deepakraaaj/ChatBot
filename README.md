@@ -33,7 +33,6 @@ docker ps --filter name=lightning_
 | **Backend API** | `lightning_backend` | `8000` |
 | **Elasticsearch** | `lightning_es` | `9201` |
 | **Redis Cache** | `lightning_redis` | `6380` |
-| **Database** | `lightning_db` | `3308` |
 | **Dashboard** | `lightning_dashboard` | `8501` |
 
 ## 🏗️ System Architecture
@@ -113,10 +112,7 @@ app/
 
 ## ❓ FAQ & Clarifications
 
-### What is the purpose of `lightning_db`?
-The `lightning_db` container in `docker-compose.yml` provides a local **MySQL** instance. 
-- **Local Development**: It serves as a dedicated environment for development and testing without requiring external infrastructure.
-- **Workflow State & Metadata**: While Elasticsearch handles vector search, the SQL database stores structured data, user contexts, and persistent workflow states.
-- **Managed Deployment**: If you have a remote `DATABASE_URL` configured in your `.env`, you can safely stop the `lightning_db` service. However, it's kept in the compose file to ensure the project is "ready-to-run" out of the box for anyone cloning the repo.
+### Why is there no local database?
+The system is designed to use a managed/external **SQL Database** (MySQL/PostgreSQL) via the `DATABASE_URL` environment variable. This ensures data persistence and security are handled by a dedicated database provider.
 
 
