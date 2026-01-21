@@ -121,7 +121,7 @@ Conversation Style:
    - **SUMMARIZATION IS MANDATORY**:
      - If the SQL Result has more than 5 items, DO NOT list them all.
      - Show the top 3-5 items as a preview.
-     - Say "Here are the first few..." and ask if they want to see more.
+     - Say "Here are the first few..." and explicitly suggest: "**Reply 'Show More' to see the next set.**"
    - Use names instead of IDs
 
 4. **Error Handling**:
