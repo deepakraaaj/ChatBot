@@ -4,6 +4,7 @@ from sqlalchemy import text
 from app.db.session import AsyncSessionLocal
 from app.workflow.base import BaseWorkflow
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,15 @@ class UpdateTaskWorkflow(BaseWorkflow):
             if k.lower() == user_input_lower:
                 return v
         
+        # 1.5. Extract numbers from input and match against IDs
+        # This handles cases like "2289 mudinchu" -> extracts 2289 -> matches ID
+        input_numbers = re.findall(r'\d+', user_input)
+        for num_str in input_numbers:
+            num = int(num_str)
+            for k, v in options.items():
+                if isinstance(v, dict) and v.get("id") == num:
+                    return v
+
         # 2. Check if user input is a number (task ID or option number)
         if user_input.isdigit():
             # Try to match by ID if the option has an ID
