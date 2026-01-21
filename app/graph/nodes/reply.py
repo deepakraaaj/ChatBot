@@ -50,7 +50,7 @@ class ReplyNode:
                 "company_name": state.get("company_name", "Unknown"),
                 "intent": state.get("intent"),
                 "sql_query": state.get("sql_query"),
-                "sql_result": str(state.get("sql_result", "")), # Convert list/dict to string
+                "sql_result": str(state.get("sql_result", ""))[:2500], # Convert list/dict to string and TRUNCATE to avoid massive context loop
                 "sql_error": state.get("sql_error"),
                 "workflow_step": state.get("workflow_step"),
                 "workflow_instruction": workflow_instruction,
