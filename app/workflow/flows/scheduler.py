@@ -268,11 +268,56 @@ class SchedulerWorkflow(BaseWorkflow):
         }
 
     def _resolve_selection(self, user_input, options):
-        if user_input in options:
-            return options[user_input]
+        \"\"\"
+        Intelligently resolve user selection with fuzzy matching.
+        Handles typos, variations, and partial matches.
+        \"\"\"
+        if not options:
+            return None
+            
+        user_input_lower = user_input.lower().strip()
+        
+        # 1. Exact match (case-insensitive)
         for k, v in options.items():
-            if k.lower() == user_input.lower():
+            if k.lower() == user_input_lower:
                 return v
+        
+        # 2. Check if user input is a number (task ID or option number)
+        if user_input.isdigit():
+            # Try to match by ID if the option has an ID
+            for k, v in options.items():
+                if isinstance(v, dict) and v.get(\"id\") == int(user_input):
+                    return v
+            # Try to match by position (1-indexed)
+            try:
+                idx = int(user_input) - 1
+                if 0 <= idx < len(options):
+                    return list(options.values())[idx]
+            except:
+                pass
+        
+        # 3. Fuzzy matching using difflib
+        from difflib import get_close_matches
+        
+        # Get all option keys
+        option_keys = list(options.keys())
+        
+        # Find close matches (threshold 0.6 = 60% similarity)
+        close_matches = get_close_matches(user_input, option_keys, n=1, cutoff=0.6)
+        
+        if close_matches:
+            return options[close_matches[0]]
+        
+        # 4. Partial match - check if user input is contained in any option
+        for k, v in options.items():
+            if user_input_lower in k.lower():
+                return v
+        
+        # 5. Check if option name is contained in user input
+        for k, v in options.items():
+            if k.lower() in user_input_lower:
+                return v
+        
         return None
 
     async def _extract_fields_from_input(self, user_input: str, company_id: str) -> Dict[str, Any]:
