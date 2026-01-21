@@ -13,9 +13,11 @@ graph TB
         ReverseProxy -->|Route| FastAPI[FastAPI Backend<br/>Port 8000]
     end
     
-    subgraph "Authentication & Security"
+    subgraph "Middleware & Security"
         FastAPI -->|Validate| Auth[JWT Authentication]
         Auth -->|Check| Guardrails[Security Guardrails]
+        FastAPI -->|Track| TraceManager[Trace Manager<br/>Observability]
+        TraceManager -->|Log| StructuredLogs[Structured Logging]
     end
     
     subgraph "Core Processing Engine"
@@ -42,8 +44,15 @@ graph TB
         StreamManager -.->|Use| MetricsSvc[Metrics Service]
     end
     
+    subgraph "Data Transformation"
+        N5 -->|Encode Results| ToonCodec[TOON Codec<br/>Data Compression]
+        ToonCodec -->|Compressed Data| N4
+        StreamManager -->|Format Response| ToonCodec
+    end
+    
     subgraph "LLM Provider Layer"
         N1 & N2 & N4 -->|Route| LLMRouter[LLM Router]
+        LLMRouter -->|Load Prompts| PromptTemplates[Prompt Templates]
         LLMRouter -->|Primary| SelfHosted[Self-Hosted LLM<br/>FastQwenRunner]
         LLMRouter -->|Fallback| Groq[Groq API]
         LLMRouter -->|Alternative| Bedrock[AWS Bedrock]
@@ -54,12 +63,14 @@ graph TB
         
         subgraph "Vector Search"
             VectorSvc -->|Search| ES[(Elasticsearch<br/>Port 9201)]
-            VectorSvc -->|Cache| Redis1[Redis Cache Layer]
+            VectorSvc -->|Cache Embeddings| Redis1[Redis Cache Layer]
         end
         
         subgraph "Caching Layer"
             Redis1[(Redis<br/>Port 6380)]
             VectorSvc & N2 -.->|Cache| Redis1
+            Redis1 -.->|SQL Cache| N2
+            Redis1 -.->|Response Cache| N4
         end
         
         subgraph "Persistent Storage"
@@ -75,6 +86,7 @@ graph TB
     subgraph "Monitoring & Analytics"
         MetricsSvc -->|Expose| Dashboard[Streamlit Dashboard<br/>Port 8501]
         Dashboard -->|Query| FastAPI
+        TraceManager -.->|Send Metrics| MetricsSvc
     end
     
     subgraph "External Services"
@@ -83,7 +95,7 @@ graph TB
     end
     
     GraphEngine -.->|Final State| StreamManager
-    StreamManager -->|Stream| User
+    StreamManager -->|Stream Tokens| User
     
     classDef gateway fill:#ffcccc,stroke:#cc0000,stroke-width:2px,color:#000;
     classDef processing fill:#ccffcc,stroke:#00cc00,stroke-width:2px,color:#000;
@@ -91,13 +103,15 @@ graph TB
     classDef storage fill:#ffccff,stroke:#cc00cc,stroke-width:2px,color:#000;
     classDef llm fill:#ffffcc,stroke:#cccc00,stroke-width:2px,color:#000;
     classDef monitoring fill:#ffebcc,stroke:#ff8800,stroke-width:2px,color:#000;
+    classDef transform fill:#e0f7fa,stroke:#006064,stroke-width:2px,color:#000;
     
     class ReverseProxy,FastAPI,Auth,Guardrails gateway;
     class StreamManager,GraphEngine,N1,N2,N3,N4,N5 processing;
     class VectorSvc,HistorySvc,UserCtxSvc,WorkflowSvc,SchemaSvc,MetricsSvc service;
     class ES,Redis1,MySQL,ExternalDB storage;
-    class LLMRouter,SelfHosted,Groq,Bedrock llm;
-    class Dashboard,Mailer monitoring;
+    class LLMRouter,SelfHosted,Groq,Bedrock,PromptTemplates llm;
+    class Dashboard,Mailer,TraceManager,StructuredLogs monitoring;
+    class ToonCodec transform;
 ```
 
 ## Container Deployment View
@@ -299,6 +313,47 @@ graph TB
     A1 & A2 --> D1 & D2 & D3
     A1 & A4 --> I1 & I2 & I3
 ```
+
+## Core Components Detail
+
+### TOON Codec (Token-Oriented Object Notation)
+- **Purpose**: Compresses large SQL result sets by extracting common strings into a lookup table
+- **Location**: `app/core/codec.py`
+- **Usage**: Automatically applied to SQL query results before transmission
+- **Benefits**: 
+  - Reduces token count for LLM context
+  - Decreases network bandwidth
+  - Typical compression: 30-70% for structured data
+- **Metrics Tracked**: `raw_tokens`, `toon_tokens`, `reduction_pct`
+
+### Trace Manager
+- **Purpose**: Distributed tracing and observability across the request lifecycle
+- **Location**: `app/core/observability.py`
+- **Features**:
+  - Context-aware trace ID propagation
+  - Span-based execution tracking
+  - Structured JSON logging
+  - Performance metrics collection
+- **Integration**: Automatically injected via middleware
+
+### Prompt Templates
+- **Purpose**: Centralized LLM prompt management
+- **Location**: `app/core/prompts.py`
+- **Templates**:
+  - Intent classification prompts
+  - SQL generation prompts
+  - Response synthesis prompts
+  - Workflow step prompts
+
+### Security Components
+- **Guardrails**: Input validation and content safety (`app/core/guardrails.py`)
+- **Security Rules**: Malicious pattern detection (`app/core/security_rules.py`)
+- **JWT Auth**: Token-based authentication (`app/core/security.py`)
+
+### Infrastructure Clients
+- **Elasticsearch Client**: Connection pooling, bulk operations (`app/core/es.py`)
+- **Redis Cache Client**: Multi-level caching strategy (`app/core/cache.py`)
+- **Settings Manager**: Environment-based configuration (`app/core/settings.py`)
 
 ## Key Features
 
