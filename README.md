@@ -1,118 +1,94 @@
-# ⚡ LightningBot (Optimized AI Backend)
+# LightningBot (Optimized AI Backend)
 
-A ultra-high-performance **FastAPI** backend designed for lighting-fast response times. This is an optimized version of the facility operations assistant, leveraging **Elasticsearch** for scalable vector search, **Redis** for aggressive caching, and **Bulk APIs** for high-throughput ingestion.
+LightningBot is a high-performance FastAPI backend designed for low-latency AI-driven operations. This implementation optimizes the facility operations assistant by utilizing Elasticsearch for distributed vector search, Redis for hierarchical caching, and a multi-agent state graph for complex reasoning.
 
-## 🏗️ Architecture
+## Architecture Overview
 
-The backend is structured as a graph of specialized agents optimized for speed:
-*   **Graph Engine**: Stateful, cyclical reasoning using `LangGraph`.
-*   **Vector Search (ES)**: Uses **Elasticsearch** for production-grade, distributed vector search.
-*   **Lightning Cache**: **Redis** caching for vectors and LLM responses, reducing latency by up to 80% on repeat queries.
-*   **High-Speed Ingestion**: Optimized with Elasticsearch Bulk APIs.
+The system architecture is centered around a state-driven graph engine that orchestrates specialized agents and services.
 
-## ✨ Lightning Features
+### Core Backend Implementation
 
-- **Connection Pooling**: Optimized ES and Redis clients for high concurrency.
-- **Selective Field Fetching**: Only retrieves required data from the database to minimize JSON overhead.
-- **Batch Processing**: Parallelizes embedding generation for document ingestion.
+The backend logic is implemented as a state machine using the LangGraph engine. Every request traverses a series of nodes that incrementally process the user input:
 
-## 🚀 Running with Docker (Lightning Mode)
+1.  **Intent Understanding Node**: Analyzes the raw prompt to determine whether it requires a database query (SQL), a multi-step process (Workflow), or a direct response (General Chat).
+2.  **SQL Planning Node**: For database-centric intents, this node translates natural language into optimized SQL queries after analyzing the target schema.
+3.  **SQL Execution Node**: Safely executes the generated SQL and formats the results for subsequent reasoning.
+4.  **Workflow Engine Node**: Handles stateful interactions for complex tasks, such as creating schedules or updating facility metadata.
+5.  **Response Synthesis Node**: Aggregates context from the vector database, SQL results, and workflow status to generate a final consolidated response.
 
-The easiest way to find and run this system is using Docker Compose. The project is named **LightningBot** for easy identification.
+```mermaid
+graph TD
+    User([User / Client]) <--> API[FastAPI Backend]
+    
+    subgraph "State Machine (LangGraph)"
+        API <--> Engine[Graph Engine]
+        Engine --> U[Understanding]
+        U -- SQL Intent --> P[SQL Planning]
+        P -- Valid Plan --> E[SQL Execution]
+        U -- Workflow Intent --> W[Workflow Engine]
+        U -- General Intent --> R[Response Synthesis]
+        P -- Plan Error --> R
+        E --> R
+        W --> R
+        R --> Engine
+    end
+    
+    subgraph "Data Services"
+        U & P & W & R <--> Vector[Vector Service / Elasticsearch]
+        U & P & W & R <--> Cache[Caching Layer / Redis]
+        E & W <--> DB[Structured Data / SQL DB]
+    end
+```
+
+### Data Layer and Search
+
+- **Vector Search**: Utilizes Elasticsearch for dense vector indexing and retrieval, supporting production-grade scalability.
+- **Hierarchical Caching**: Implements Redis to cache both vector embeddings and LLM response fragments, reducing average latency significantly.
+- **Service Layer**: Centralized business logic in `app/services/` for handling vector operations, usage metrics, and historical context.
+
+### LLM Integration Layer
+
+The system serves as a model-agnostic router. Connectivity is managed via environment-specified URLs for various providers:
+
+- **Self-Hosted / Private Cloud**: Configurable via `SELF_HOSTED_BASE_URL` (supports Qwen, Llama, etc.).
+- **Cloud Providers**: Native support for Groq and AWS Bedrock via standardized API endpoints.
+
+## Project Structure
+
+```
+app/
+├── api/        # FastAPI Endpoint Definitions
+├── core/       # Optimized Infrastructure Clients (ES, Redis)
+├── db/         # SQL Alchemy Models and Sessions
+├── graph/      # Multi-Agent State Machine Logic
+├── llm/        # Model Provider Router
+├── services/   # Centralized Vector and Metadata Services
+└── workflow/   # Stateful Interaction flows
+```
+
+## Deployment Configuration
+
+The application is containerized for consistent deployment across environments.
 
 ```bash
-# Start all services (Backend, ES, Redis, MySQL, Dashboard)
+# Start infrastructure and application services
 docker compose up -d
 
-# Verify running containers
+# Verify service health
 docker ps --filter name=lightning_
 ```
 
-| Service | Container Name | Port |
+| Service | Container Name | Interface Port |
 | :--- | :--- | :--- |
 | **Backend API** | `lightning_backend` | `8000` |
 | **Elasticsearch** | `lightning_es` | `9201` |
 | **Redis Cache** | `lightning_redis` | `6380` |
 | **Dashboard** | `lightning_dashboard` | `8501` |
 
-## 🏗️ System Architecture
+## Frequently Asked Questions
 
-The following diagram illustrates the core components of the **LightningBot** system and how they interact:
+### Why is there no local database service in the configuration?
+The system is designed to interface with managed SQL databases via the `DATABASE_URL` environment variable. This approach ensures that data persistence and security are handled by enterprise-grade infrastructure.
 
-```mermaid
-graph TD
-    User([User / Client]) <--> API[FastAPI Backend]
-    
-    subgraph "Core Backend"
-        API <--> Graph[LangGraph Engine]
-        Graph <--> Nodes{Specialized Nodes}
-    end
-    
-    subgraph "Data & Search"
-        Nodes <--> ES[(Elasticsearch)]
-        Nodes <--> Redis[(Redis Cache)]
-        Nodes <--> DB[(MySQL / SQL DB)]
-    end
-    
-    subgraph "LLM Layer"
-        Nodes <--> Router[LLM Router]
-        Router <--> Groq[Groq API]
-        Router <--> Gemini[Gemini API]
-        Router <--> Local[Self-Hosted LLM]
-    end
-
-    classDef primary fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef storage fill:#82b1ff,stroke:#333,stroke-width:2px;
-    classDef llm fill:#b2ff59,stroke:#333,stroke-width:2px;
-    
-    class ES,Redis,DB storage;
-    class Groq,Gemini,Local llm;
-```
-
-## 🔄 Request-Response Flow
-
-This sequence diagram shows how a user query is processed through the multi-agent graph with caching and vector search:
-
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant A as API
-    participant G as Graph Engine
-    participant C as Redis Cache
-    participant V as Vector Service (ES)
-    participant L as LLM Provider
-
-    U->>A: Send Message
-    A->>G: Initialize Workflow State
-    G->>C: Check Cache for Query/Embedding
-    alt Cache Hit
-        C-->>G: Return Cached Data
-    else Cache Miss
-        G->>V: Perform Semantic Search
-        V-->>G: Return Context
-        G->>C: Cache Vector/Result
-    end
-    G->>L: Request Reasoning (with Context)
-    L-->>G: Return AI Response
-    G->>A: Finalize Response
-    A->>U: Return Response (Streaming/JSON)
-```
-
-## 📂 Project Structure
-```
-app/
-├── api/        # FastAPI Routes
-├── core/       # Optimized ES/Redis Clients
-├── db/         # SQL Models
-├── graph/      # Multi-Agent Logic
-├── llm/        # Model Router (Groq/Gemini/Self-Hosted)
-├── services/   # Lightning Vector Service 
-└── workflow/   # Workflow Engine
-```
-
-## ❓ FAQ & Clarifications
-
-### Why is there no local database?
-The system is designed to use a managed/external **SQL Database** (MySQL/PostgreSQL) via the `DATABASE_URL` environment variable. This ensures data persistence and security are handled by a dedicated database provider.
-
-
+### How is the LLM provider selected?
+The backend uses a routing mechanism defined in `app/llm/router.py`. It prioritizes providers based on the `LLM_PRIMARY_PROVIDER` setting, allowing for seamless transitions between local models and third-party APIs.
