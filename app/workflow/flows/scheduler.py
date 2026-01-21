@@ -268,10 +268,10 @@ class SchedulerWorkflow(BaseWorkflow):
         }
 
     def _resolve_selection(self, user_input, options):
-        \"\"\"
+        """
         Intelligently resolve user selection with fuzzy matching.
         Handles typos, variations, and partial matches.
-        \"\"\"
+        """
         if not options:
             return None
             
@@ -286,7 +286,7 @@ class SchedulerWorkflow(BaseWorkflow):
         if user_input.isdigit():
             # Try to match by ID if the option has an ID
             for k, v in options.items():
-                if isinstance(v, dict) and v.get(\"id\") == int(user_input):
+                if isinstance(v, dict) and v.get("id") == int(user_input):
                     return v
             # Try to match by position (1-indexed)
             try:
