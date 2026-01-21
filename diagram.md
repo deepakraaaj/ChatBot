@@ -1,345 +1,321 @@
-# LightningBot - Complete System Architecture
-
-This document provides a comprehensive architectural overview of the LightningBot system, covering all implementation details from the API layer to data persistence.
+# LightningBot - System Architecture Diagram
 
 ## Complete System Architecture
 
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        Client[Client Application]
+        User([Users/Applications])
     end
     
-    subgraph "API Gateway"
-        Client -->|HTTP/WebSocket| FastAPI[FastAPI Application]
-        FastAPI -->|CORS & Auth| Middleware[Middleware Layer]
-        Middleware -->|Trace ID| TraceManager[Trace Manager]
+    subgraph "API Gateway Layer"
+        User -->|HTTPS| ReverseProxy[Reverse Proxy / Load Balancer]
+        ReverseProxy -->|Route| FastAPI[FastAPI Backend<br/>Port 8000]
     end
     
-    subgraph "Authentication & Authorization"
-        Middleware --> Auth[Auth Service]
-        Auth -->|JWT Validation| TokenVerify[Token Verification]
-        TokenVerify -->|User Context| UserDB[(User Table)]
+    subgraph "Authentication & Security"
+        FastAPI -->|Validate| Auth[JWT Authentication]
+        Auth -->|Check| Guardrails[Security Guardrails]
     end
     
-    subgraph "Request Processing Pipeline"
-        Middleware --> StreamManager[Chat Stream Manager]
-        StreamManager -->|Initialize State| GraphEngine[LangGraph Engine]
-        StreamManager -->|Token Queue| StreamQueue[Async Queue]
-    end
-    
-    subgraph "LangGraph State Machine"
-        GraphEngine -->|Entry Point| Understanding[Understanding Node]
+    subgraph "Core Processing Engine"
+        Guardrails -->|Process| StreamManager[Stream Manager]
+        StreamManager -->|Initialize| GraphEngine[LangGraph State Machine]
         
-        Understanding -->|Intent: SQL| SQLPlanning[SQL Planning Node]
-        Understanding -->|Intent: Workflow| WorkflowEngine[Workflow Engine Node]
-        Understanding -->|Intent: Chat| Reply[Reply Node]
-        
-        SQLPlanning -->|Valid Query| SQLExecution[SQL Execution Node]
-        SQLPlanning -->|Invalid/Error| Reply
-        
-        SQLExecution --> Reply
-        WorkflowEngine --> Reply
-        
-        Reply -->|Final Response| GraphEngine
+        subgraph "Graph Nodes"
+            GraphEngine -->|Entry| N1[Understanding Node]
+            N1 -->|SQL Intent| N2[SQL Planning Node]
+            N1 -->|Workflow Intent| N3[Workflow Engine Node]
+            N1 -->|Chat Intent| N4[Reply Node]
+            N2 -->|Execute| N5[SQL Execution Node]
+            N5 --> N4
+            N3 --> N4
+        end
     end
     
-    subgraph "Understanding Node Details"
-        Understanding --> IntentClassifier[Intent Classifier]
-        IntentClassifier -->|Analyze Prompt| LLMRouter1[LLM Router]
-        IntentClassifier -->|Check History| HistoryService[History Service]
-        IntentClassifier -->|Load Context| UserContextService[User Context Service]
-        IntentClassifier -->|Semantic Search| VectorService1[Vector Service]
-    end
-    
-    subgraph "SQL Planning Node Details"
-        SQLPlanning --> SchemaAnalyzer[Schema Analyzer]
-        SchemaAnalyzer -->|Fetch Schema| SchemaService[Schema Service]
-        SchemaAnalyzer -->|Check Cache| SQLCache[(SQL Cache Table)]
-        SchemaAnalyzer -->|Generate SQL| LLMRouter2[LLM Router]
-        SchemaAnalyzer -->|Validate| SQLValidator[SQL Validator]
-    end
-    
-    subgraph "SQL Execution Node Details"
-        SQLExecution --> SafeExecutor[Safe SQL Executor]
-        SafeExecutor -->|Execute Query| TargetDB[(Target Database)]
-        SafeExecutor -->|Format Results| ResultFormatter[Result Formatter]
-        ResultFormatter -->|Encode| ToonCodec[TOON Codec]
-    end
-    
-    subgraph "Workflow Engine Details"
-        WorkflowEngine --> WorkflowRegistry[Workflow Registry]
-        WorkflowRegistry -->|Scheduler| SchedulerFlow[Scheduler Workflow]
-        WorkflowRegistry -->|Task Update| TaskUpdateFlow[Task Update Workflow]
-        WorkflowRegistry -->|Help Menu| HelpFlow[Help Workflow]
-        
-        SchedulerFlow -->|Load State| WorkflowStateService[Workflow State Service]
-        SchedulerFlow -->|Multi-Step| StepProcessor[Step Processor]
-        StepProcessor -->|Save State| WorkflowStateDB[(Workflow State Table)]
-    end
-    
-    subgraph "Reply Node Details"
-        Reply --> ResponseBuilder[Response Builder]
-        ResponseBuilder -->|Context Assembly| ContextAggregator[Context Aggregator]
-        ContextAggregator -->|Vector Context| VectorService2[Vector Service]
-        ContextAggregator -->|SQL Results| SQLResults[SQL Results]
-        ContextAggregator -->|Workflow Data| WorkflowData[Workflow Data]
-        ResponseBuilder -->|Generate| LLMRouter3[LLM Router]
-        ResponseBuilder -->|Stream Tokens| StreamQueue
+    subgraph "Service Layer"
+        N1 & N2 & N3 & N4 -.->|Use| VectorSvc[Vector Service]
+        N1 & N4 -.->|Use| HistorySvc[History Service]
+        N1 -.->|Use| UserCtxSvc[User Context Service]
+        N3 -.->|Use| WorkflowSvc[Workflow State Service]
+        N2 -.->|Use| SchemaSvc[Schema Service]
+        StreamManager -.->|Use| MetricsSvc[Metrics Service]
     end
     
     subgraph "LLM Provider Layer"
-        LLMRouter1 & LLMRouter2 & LLMRouter3 --> ProviderRouter[LLM Provider Router]
-        ProviderRouter -->|Primary| SelfHosted[Self-Hosted LLM]
-        ProviderRouter -->|Fallback| Groq[Groq API]
-        ProviderRouter -->|Alternative| Bedrock[AWS Bedrock]
+        N1 & N2 & N4 -->|Route| LLMRouter[LLM Router]
+        LLMRouter -->|Primary| SelfHosted[Self-Hosted LLM<br/>FastQwenRunner]
+        LLMRouter -->|Fallback| Groq[Groq API]
+        LLMRouter -->|Alternative| Bedrock[AWS Bedrock]
+    end
+    
+    subgraph "Data Infrastructure"
+        direction TB
         
-        SelfHosted -->|HTTP| SelfHostedURL[SELF_HOSTED_BASE_URL]
-        Groq -->|HTTP| GroqURL[GROQ_BASE_URL]
-        Bedrock -->|HTTP| BedrockURL[BEDROCK_BASE_URL]
-    end
-    
-    subgraph "Vector Search Infrastructure"
-        VectorService1 & VectorService2 --> VectorCore[Vector Service Core]
-        VectorCore -->|Generate Embeddings| EmbeddingModel[Embedding Model]
-        VectorCore -->|Check Cache| RedisCache1[Redis Cache]
-        VectorCore -->|Vector Search| Elasticsearch[(Elasticsearch)]
-        VectorCore -->|Bulk Index| ESBulkAPI[ES Bulk API]
-    end
-    
-    subgraph "Data Persistence Layer"
-        HistoryService -->|Save Messages| ChatHistoryDB[(Chat History Table)]
-        WorkflowStateService -->|Save/Load State| WorkflowStateDB
-        UserContextService -->|Load User Data| UserDB
-        SchemaService -->|Fetch Metadata| SchemaDB[(Schema Table)]
+        subgraph "Vector Search"
+            VectorSvc -->|Search| ES[(Elasticsearch<br/>Port 9201)]
+            VectorSvc -->|Cache| Redis1[Redis Cache Layer]
+        end
         
-        ChatHistoryDB & WorkflowStateDB & UserDB & SchemaDB & SQLCache --> MySQL[(MySQL Database)]
-    end
-    
-    subgraph "Caching Layer"
-        RedisCache1[Redis Cache] --> RedisClient[Redis Client]
-        RedisClient -->|Embedding Cache| EmbedCache[Embedding Cache]
-        RedisClient -->|Response Cache| ResponseCache[Response Cache]
-        RedisClient -->|Connection Pool| RedisPool[Connection Pool]
-    end
-    
-    subgraph "Monitoring & Metrics"
-        StreamManager -->|Record Metrics| MetricsService[Metrics Service]
-        MetricsService -->|Usage Data| MetricsDB[(Usage Metrics Table)]
-        MetricsDB --> MySQL
+        subgraph "Caching Layer"
+            Redis1[(Redis<br/>Port 6380)]
+            VectorSvc & N2 -.->|Cache| Redis1
+        end
         
-        MetricsService -->|Analytics| Dashboard[Streamlit Dashboard]
-        Dashboard -->|Query API| FastAPI
+        subgraph "Persistent Storage"
+            HistorySvc -->|Save/Load| MySQL[(MySQL Database)]
+            UserCtxSvc -->|Load| MySQL
+            WorkflowSvc -->|Save/Load| MySQL
+            SchemaSvc -->|Fetch| MySQL
+            MetricsSvc -->|Record| MySQL
+            N5 -->|Execute| MySQL
+        end
     end
     
-    subgraph "Security & Guardrails"
-        Middleware -->|Input Validation| Guardrails[Guardrails Service]
-        Guardrails -->|Safety Check| SafetyRules[Security Rules]
-        Guardrails -->|Block Malicious| BlockList[Block List]
+    subgraph "Monitoring & Analytics"
+        MetricsSvc -->|Expose| Dashboard[Streamlit Dashboard<br/>Port 8501]
+        Dashboard -->|Query| FastAPI
     end
     
-    subgraph "Infrastructure Services"
-        Elasticsearch -->|Index Management| ESClient[ES Client]
-        RedisClient -->|Connection| RedisInfra[Redis Infrastructure]
-        MySQL -->|Connection Pool| SQLAlchemy[SQLAlchemy Engine]
+    subgraph "External Services"
+        N5 -.->|Query| ExternalDB[(External Databases)]
+        FastAPI -.->|Notify| Mailer[Email Service]
     end
     
     GraphEngine -.->|Final State| StreamManager
-    StreamManager -->|Save History| HistoryService
-    StreamManager -->|Save Workflow| WorkflowStateService
-    StreamManager -->|Format Response| ResponseFormatter2[Response Formatter]
-    ResponseFormatter2 -->|JSON Stream| Client
+    StreamManager -->|Stream| User
     
-    classDef nodeClass fill:#e1f5ff,stroke:#01579b,stroke-width:2px;
-    classDef serviceClass fill:#f3e5f5,stroke:#4a148c,stroke-width:2px;
-    classDef dbClass fill:#fff3e0,stroke:#e65100,stroke-width:2px;
-    classDef infraClass fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
-    classDef llmClass fill:#fce4ec,stroke:#880e4f,stroke-width:2px;
+    classDef gateway fill:#ffcccc,stroke:#cc0000,stroke-width:2px,color:#000;
+    classDef processing fill:#ccffcc,stroke:#00cc00,stroke-width:2px,color:#000;
+    classDef service fill:#ccccff,stroke:#0000cc,stroke-width:2px,color:#000;
+    classDef storage fill:#ffccff,stroke:#cc00cc,stroke-width:2px,color:#000;
+    classDef llm fill:#ffffcc,stroke:#cccc00,stroke-width:2px,color:#000;
+    classDef monitoring fill:#ffebcc,stroke:#ff8800,stroke-width:2px,color:#000;
     
-    class Understanding,SQLPlanning,SQLExecution,WorkflowEngine,Reply nodeClass;
-    class HistoryService,UserContextService,VectorService1,VectorService2,MetricsService,WorkflowStateService,SchemaService serviceClass;
-    class MySQL,Elasticsearch,UserDB,ChatHistoryDB,WorkflowStateDB,MetricsDB,SchemaDB,SQLCache,TargetDB dbClass;
-    class RedisClient,ESClient,SQLAlchemy,RedisInfra infraClass;
-    class SelfHosted,Groq,Bedrock,ProviderRouter,LLMRouter1,LLMRouter2,LLMRouter3 llmClass;
+    class ReverseProxy,FastAPI,Auth,Guardrails gateway;
+    class StreamManager,GraphEngine,N1,N2,N3,N4,N5 processing;
+    class VectorSvc,HistorySvc,UserCtxSvc,WorkflowSvc,SchemaSvc,MetricsSvc service;
+    class ES,Redis1,MySQL,ExternalDB storage;
+    class LLMRouter,SelfHosted,Groq,Bedrock llm;
+    class Dashboard,Mailer monitoring;
 ```
 
-## Request Flow Sequence
+## Container Deployment View
 
 ```mermaid
-sequenceDiagram
-    participant Client
-    participant API as FastAPI
-    participant Auth as Auth Service
-    participant Stream as Stream Manager
-    participant Graph as LangGraph Engine
-    participant Node as Graph Nodes
-    participant LLM as LLM Router
-    participant Vector as Vector Service
-    participant ES as Elasticsearch
-    participant Redis as Redis Cache
-    participant DB as MySQL Database
-    participant Queue as Token Queue
-
-    Client->>API: POST /chat (message, session_id)
-    API->>Auth: Validate JWT Token
-    Auth->>DB: Fetch User Context
-    DB-->>Auth: User Data
-    Auth-->>API: Authenticated User
-    
-    API->>Stream: Initialize Stream Manager
-    Stream->>DB: Load Chat History
-    DB-->>Stream: Previous Messages
-    Stream->>DB: Load Workflow State
-    DB-->>Stream: Workflow Context
-    
-    Stream->>Graph: ainvoke(initial_state)
-    activate Graph
-    
-    Graph->>Node: Understanding Node
-    activate Node
-    Node->>Vector: Semantic Search
-    Vector->>Redis: Check Embedding Cache
-    alt Cache Hit
-        Redis-->>Vector: Cached Embedding
-    else Cache Miss
-        Vector->>LLM: Generate Embedding
-        LLM-->>Vector: Embedding Vector
-        Vector->>Redis: Cache Embedding
-    end
-    Vector->>ES: Vector Search
-    ES-->>Vector: Relevant Context
-    Vector-->>Node: Search Results
-    
-    Node->>LLM: Classify Intent
-    LLM-->>Node: Intent + Parameters
-    deactivate Node
-    
-    alt Intent: SQL
-        Graph->>Node: SQL Planning Node
-        activate Node
-        Node->>DB: Fetch Schema
-        DB-->>Node: Table Metadata
-        Node->>LLM: Generate SQL
-        LLM-->>Node: SQL Query
-        deactivate Node
+graph LR
+    subgraph "Docker Compose Stack"
+        subgraph "Backend Container"
+            BE[lightning_backend<br/>FastAPI + LangGraph<br/>Port: 8000]
+        end
         
-        Graph->>Node: SQL Execution Node
-        activate Node
-        Node->>DB: Execute Query
-        DB-->>Node: Query Results
-        deactivate Node
-    else Intent: Workflow
-        Graph->>Node: Workflow Engine Node
-        activate Node
-        Node->>DB: Load Workflow State
-        DB-->>Node: Current Step
-        Node->>LLM: Process Step
-        LLM-->>Node: Next Action
-        Node->>DB: Save Workflow State
-        deactivate Node
+        subgraph "Search Container"
+            ESC[lightning_es<br/>Elasticsearch 8.17<br/>Port: 9201]
+        end
+        
+        subgraph "Cache Container"
+            RC[lightning_redis<br/>Redis 7.2<br/>Port: 6380]
+        end
+        
+        subgraph "Dashboard Container"
+            DC[lightning_dashboard<br/>Streamlit<br/>Port: 8501]
+        end
+        
+        BE <-->|Vector Search| ESC
+        BE <-->|Caching| RC
+        DC -->|API Calls| BE
     end
     
-    Graph->>Node: Reply Node
-    activate Node
-    Node->>Vector: Fetch Additional Context
-    Vector-->>Node: Context Data
-    Node->>LLM: Generate Response (Streaming)
-    
-    loop Token Streaming
-        LLM->>Queue: Token
-        Queue->>Stream: Token
-        Stream->>Client: SSE Token Event
+    subgraph "External Dependencies"
+        ExtDB[(External MySQL<br/>via DATABASE_URL)]
+        ExtLLM[Self-Hosted LLM<br/>FastQwenRunner]
+        CloudLLM[Cloud LLM Providers<br/>Groq / Bedrock]
     end
     
-    LLM-->>Node: Complete Response
-    deactivate Node
+    BE <-->|SQL Queries| ExtDB
+    BE -->|LLM Requests| ExtLLM
+    BE -->|Fallback| CloudLLM
     
-    Graph-->>Stream: Final State
-    deactivate Graph
+    Client([Client Applications]) -->|HTTPS| BE
+    Client -->|View Metrics| DC
     
-    Stream->>DB: Save Chat History
-    Stream->>DB: Save Workflow State
-    Stream->>DB: Record Usage Metrics
+    classDef container fill:#e1f5ff,stroke:#01579b,stroke-width:3px;
+    classDef external fill:#fff3e0,stroke:#e65100,stroke-width:2px;
     
-    Stream->>Client: Final Result (JSON)
+    class BE,ESC,RC,DC container;
+    class ExtDB,ExtLLM,CloudLLM external;
+```
+
+## Request Processing Flow
+
+```mermaid
+graph TB
+    Start([Client Request]) -->|POST /chat| API[FastAPI Endpoint]
+    
+    API --> Auth{JWT Valid?}
+    Auth -->|No| Reject[401 Unauthorized]
+    Auth -->|Yes| Guard{Safe Input?}
+    
+    Guard -->|No| Block[400 Bad Request]
+    Guard -->|Yes| Load[Load Context]
+    
+    Load --> History[Chat History]
+    Load --> UserCtx[User Context]
+    Load --> WFState[Workflow State]
+    
+    History & UserCtx & WFState --> Init[Initialize Graph State]
+    
+    Init --> Understanding[Understanding Node]
+    
+    Understanding --> Classify{Intent?}
+    
+    Classify -->|SQL| SQLPlan[SQL Planning]
+    Classify -->|Workflow| WFEngine[Workflow Engine]
+    Classify -->|Chat| Reply[Reply Generation]
+    
+    SQLPlan --> Valid{Valid SQL?}
+    Valid -->|Yes| SQLExec[SQL Execution]
+    Valid -->|No| Reply
+    
+    SQLExec --> Format[Format Results]
+    Format --> Reply
+    
+    WFEngine --> Step[Process Step]
+    Step --> SaveWF[Save Workflow State]
+    SaveWF --> Reply
+    
+    Reply --> Vector[Vector Context]
+    Vector --> Generate[Generate Response]
+    
+    Generate --> Stream[Stream Tokens]
+    Stream --> Save[Save History & Metrics]
+    Save --> Response([Return to Client])
+    
+    classDef decision fill:#fff9c4,stroke:#f57f17,stroke-width:2px;
+    classDef process fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px;
+    classDef endpoint fill:#ffccbc,stroke:#d84315,stroke-width:2px;
+    
+    class Classify,Valid,Auth,Guard decision;
+    class Understanding,SQLPlan,SQLExec,WFEngine,Reply,Generate process;
+    class Start,Response,Reject,Block endpoint;
 ```
 
 ## Data Flow Architecture
 
 ```mermaid
 graph LR
-    subgraph "Input Processing"
-        Input[User Input] --> Guardrails[Security Validation]
-        Guardrails --> History[Load History]
-        History --> Context[Load User Context]
+    subgraph "Input Layer"
+        I1[User Message] --> I2[Security Check]
+        I2 --> I3[Load History]
+        I3 --> I4[Load Context]
     end
     
-    subgraph "Intent Classification"
-        Context --> Vector1[Vector Search]
-        Vector1 --> LLM1[LLM Classification]
-        LLM1 --> Intent{Intent Type}
+    subgraph "Processing Layer"
+        I4 --> P1[Intent Classification]
+        P1 --> P2{Route}
+        
+        P2 -->|SQL| S1[Schema Fetch]
+        S1 --> S2[SQL Generation]
+        S2 --> S3[SQL Execution]
+        S3 --> S4[Result Format]
+        
+        P2 -->|Workflow| W1[Load State]
+        W1 --> W2[Process Step]
+        W2 --> W3[Save State]
+        
+        P2 -->|Chat| C1[Vector Search]
+        C1 --> C2[Context Retrieval]
     end
     
-    subgraph "SQL Path"
-        Intent -->|SQL| Schema[Schema Fetch]
-        Schema --> SQLGen[SQL Generation]
-        SQLGen --> SQLExec[SQL Execution]
-        SQLExec --> SQLFormat[Result Formatting]
-        SQLFormat --> TOON[TOON Encoding]
+    subgraph "Response Layer"
+        S4 --> R1[Aggregate Context]
+        W3 --> R1
+        C2 --> R1
+        
+        R1 --> R2[Generate Response]
+        R2 --> R3[Stream Output]
     end
     
-    subgraph "Workflow Path"
-        Intent -->|Workflow| WFLoad[Load Workflow State]
-        WFLoad --> WFProcess[Process Step]
-        WFProcess --> WFSave[Save State]
+    subgraph "Persistence Layer"
+        R3 --> D1[Save History]
+        R3 --> D2[Save Workflow]
+        R3 --> D3[Save Metrics]
     end
     
-    subgraph "Chat Path"
-        Intent -->|Chat| Vector2[Vector Context]
-        Vector2 --> ChatGen[Response Generation]
-    end
+    D1 & D2 & D3 --> Output[Client Response]
     
-    subgraph "Response Assembly"
-        TOON --> Aggregate[Context Aggregation]
-        WFSave --> Aggregate
-        ChatGen --> Aggregate
-        Aggregate --> FinalLLM[Final Response LLM]
-        FinalLLM --> Stream[Token Streaming]
-    end
+    classDef input fill:#e3f2fd,stroke:#1565c0,stroke-width:2px;
+    classDef process fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px;
+    classDef response fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef persist fill:#fff3e0,stroke:#ef6c00,stroke-width:2px;
     
-    subgraph "Persistence"
-        Stream --> SaveHistory[Save History]
-        Stream --> SaveWF[Save Workflow]
-        Stream --> SaveMetrics[Save Metrics]
-    end
-    
-    Stream --> Output[Client Response]
+    class I1,I2,I3,I4 input;
+    class P1,P2,S1,S2,S3,S4,W1,W2,W3,C1,C2 process;
+    class R1,R2,R3 response;
+    class D1,D2,D3,Output persist;
 ```
 
-## Component Responsibilities
+## Component Interaction Matrix
 
-### Core Nodes
-- **Understanding Node**: Intent classification, parameter extraction, context loading
-- **SQL Planning Node**: Schema analysis, SQL generation, query validation, caching
-- **SQL Execution Node**: Safe query execution, result formatting, TOON encoding
-- **Workflow Engine Node**: Multi-step process orchestration, state management
-- **Reply Node**: Context aggregation, response synthesis, token streaming
+| Component | Elasticsearch | Redis | MySQL | LLM Router | Vector Service | History Service |
+|-----------|--------------|-------|-------|------------|----------------|-----------------|
+| **Understanding Node** | ✓ (via Vector) | ✓ (cache) | ✓ (context) | ✓ | ✓ | ✓ |
+| **SQL Planning Node** | - | ✓ (cache) | ✓ (schema) | ✓ | - | - |
+| **SQL Execution Node** | - | - | ✓ (execute) | - | - | - |
+| **Workflow Engine** | - | - | ✓ (state) | ✓ | - | - |
+| **Reply Node** | ✓ (via Vector) | ✓ (cache) | - | ✓ | ✓ | - |
+| **Stream Manager** | - | - | ✓ (save) | - | - | ✓ |
 
-### Service Layer
-- **Vector Service**: Embedding generation, semantic search, bulk indexing
-- **History Service**: Chat history persistence and retrieval
-- **User Context Service**: User metadata and company context loading
-- **Workflow State Service**: Workflow state persistence and recovery
-- **Metrics Service**: Usage tracking and analytics aggregation
-- **Schema Service**: Database schema metadata management
+## Technology Stack
 
-### Infrastructure
-- **Elasticsearch**: Vector storage, semantic search, distributed indexing
-- **Redis**: Multi-level caching (embeddings, responses, SQL queries)
-- **MySQL**: Structured data persistence (users, history, workflows, metrics)
-- **LLM Router**: Provider abstraction, fallback handling, model selection
+```mermaid
+graph TB
+    subgraph "Application Layer"
+        A1[FastAPI 0.100+]
+        A2[LangGraph]
+        A3[LangChain Core]
+        A4[Streamlit]
+    end
+    
+    subgraph "AI/ML Layer"
+        M1[Sentence Transformers]
+        M2[Groq SDK]
+        M3[Custom LLM Clients]
+    end
+    
+    subgraph "Data Layer"
+        D1[SQLAlchemy 2.0]
+        D2[Elasticsearch Client]
+        D3[Redis Client]
+    end
+    
+    subgraph "Infrastructure"
+        I1[Docker Compose]
+        I2[Uvicorn ASGI]
+        I3[Async IO]
+    end
+    
+    A1 & A2 & A3 --> M1 & M2 & M3
+    A1 & A2 --> D1 & D2 & D3
+    A1 & A4 --> I1 & I2 & I3
+```
 
-### Security & Quality
-- **Guardrails Service**: Input validation, safety checks, malicious content blocking
-- **TOON Codec**: Efficient data encoding for large result sets
-- **Trace Manager**: Request tracking and observability
+## Key Features
+
+### Performance Optimizations
+- **Redis Caching**: Multi-level caching for embeddings, SQL queries, and LLM responses
+- **Elasticsearch Bulk API**: High-throughput document indexing
+- **Connection Pooling**: Optimized database and cache connections
+- **Async Processing**: Non-blocking I/O for all external calls
+
+### Reliability Features
+- **LLM Fallback Chain**: Primary → Fallback → Production provider routing
+- **Health Checks**: Provider availability monitoring
+- **Error Handling**: Graceful degradation and error recovery
+- **State Persistence**: Workflow state recovery across sessions
+
+### Security Measures
+- **JWT Authentication**: Token-based user authentication
+- **Input Guardrails**: Malicious content detection and blocking
+- **SQL Injection Prevention**: Parameterized queries and validation
+- **CORS Configuration**: Controlled cross-origin access
