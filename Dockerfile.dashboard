@@ -1,0 +1,22 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# We remove build-essential to save memory; pandas/plotly have wheels
+# We only keep basic updates if needed, but let's try skipping apt entirely first
+# for a faster, lower-memory build.
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir streamlit plotly requests pandas
+
+COPY . .
+
+EXPOSE 8501
+
+ENTRYPOINT ["streamlit", "run", "monitoring/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]

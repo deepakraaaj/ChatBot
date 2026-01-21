@@ -1,6 +1,7 @@
 
 from app.workflow.engine import workflow_engine
 from app.graph.state import GraphState
+from app.core.observability import TraceManager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,10 +18,13 @@ class WorkflowNode:
         wf_context = state.get("workflow_context") or {}
 
         if not wf_name:
-            # Start new workflow (default to scheduler for now)
-            wf_name = "scheduler"
-            curr_step = None 
-        
+            # [FIX] Do NOT default to scheduler. If understanding failed to map a workflow,
+            # we should return an error or fallback message.
+            logger.warning(f"WorkflowNode called without a valid workflow_name. Intent: {state.get('intent')}")
+            return {
+                "final_response": "I'm sorry, I couldn't determine which workflow to start. Could you please be more specific?",
+                "intent": "chat" # Force switch to chat so reply node handles it
+            }        
         # Progress
         result = await workflow_engine.get_next_step(
             workflow_name=wf_name, 
@@ -31,11 +35,21 @@ class WorkflowNode:
             context=wf_context
         )
         
-        # Extract text for chat history
+        # Extract metadata for response
         view_data = result.get("view", {})
         response_text = "Workflow Updated."
+        
         if view_data and "payload" in view_data:
             response_text = view_data["payload"].get("text", "Workflow Updated.")
+        
+        # [MONITORING] Structured workflow step logging
+        TraceManager.info(
+            f"Workflow Step Executed: {wf_name}:{result.get('workflow_step')}",
+            feature="workflow",
+            workflow=wf_name,
+            step=result.get("workflow_step"),
+            user_id=user_id
+        )
         
         return {
             "workflow_name": wf_name, # Persist name if started

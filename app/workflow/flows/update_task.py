@@ -3,6 +3,9 @@ from typing import Dict, Any, Optional
 from sqlalchemy import text
 from app.db.session import AsyncSessionLocal
 from app.workflow.base import BaseWorkflow
+import logging
+
+logger = logging.getLogger(__name__)
 
 class UpdateTaskWorkflow(BaseWorkflow):
     @property
@@ -40,7 +43,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
                     "type": "menu",
                     "payload": {
                         "text": f"Update status for '{selected_task['name']}':",
-                        "options": ["Pending", "In Progress", "Completed"]
+                        "options": ["Pending", "In Progress", "Completed", "Cancel"]
                     }
                 }
             }
@@ -109,33 +112,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
         options = {}
         async with AsyncSessionLocal() as session:
             # Query tasks assigned to user or generic if none
-            # We want tasks that are NOT completed ideally, but let's show all limit 10
-            # We assume task_transaction has 'assigned_user_id' and joins with task_description (or has name?)
-            # Based on previous work, we know task_transaction links to task_description.
-            # But let's check if task_transaction has a 'name' or 'description' column directly? 
-            # Usually it links to `task_description`. 
-            # Query: JOIN task_transaction t, task_description td ON t.task_description_id = td.id (or similar)
-            # Schema from user prompt: 
-            # 6. task_transaction (id, task_id, status, ... assigned_user_id ...)
-            # 7. (implied) task_description
-            
-            # Let's try a safe query. If check_data showed `task_transaction`, I can join.
-            # If complex, I might just select `id` and formatted string.
-            
-            query = text(f"""
-                SELECT t.id, td.name, t.status 
-                FROM task_transaction t
-                LEFT JOIN task_description td ON t.task_description_id = td.id
-                WHERE t.company_id = {company_id} 
-                AND t.assigned_user_id = {user_id}
-                AND t.status != 2 
-                LIMIT 10
-            """)
-            
-            # Use a simpler fallback query if strict join fails (e.g. if task_description_id is named differently)
-            # Actually, let's assume `task_id` is the FK to description based on `6. task_transaction (id, task_id...)`
-            # Revising query to use `task_id`.
-            
+            # Query tasks assigned to user or generic if none
             query = text(f"""
                 SELECT t.id, td.name, t.status 
                 FROM task_transaction t
@@ -157,12 +134,11 @@ class UpdateTaskWorkflow(BaseWorkflow):
                     
                     # Logic to display: "Pump Maintenance (#123) - Pending"
                     label = f"{r['name']} (#{r['id']}) - {status_str}"
-                    # label = f"Task #{r['id']} ({r.get('name', 'No Name')})"
                     options[label] = {"id": r["id"], "name": r['name']}
             except Exception as e:
                 # Fallback if query fails
                 # options["Error loading tasks"] = {"id": -1, "name": "Error"}
-                print(f"Task Query Error: {e}")
+                logger.error(f"Task Query Error: {e}")
                 pass
 
         if not options:
@@ -180,6 +156,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
 
         context["task_options"] = options
         option_labels = list(options.keys())
+        option_labels.append("Cancel")
         
         return {
             "workflow_step": "select_task",

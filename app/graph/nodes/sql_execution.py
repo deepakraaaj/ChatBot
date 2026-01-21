@@ -2,6 +2,7 @@
 from sqlalchemy import text
 from app.db.session import AsyncSessionLocal
 from app.graph.state import GraphState
+from app.core.security_rules import FORBIDDEN_SQL_KEYWORDS
 import logging
 import re
 
@@ -15,11 +16,11 @@ class SQLExecutionNode:
 
         # 1. Strict Security Check
         clean_query = query.strip().lower()
-        forbidden_keywords = ["insert", "update", "delete", "drop", "alter", "truncate", "grant", "revoke", "into outfile", "sleep", "benchmark"]
+        
         if not clean_query.startswith("select"):
              return {"sql_error": "Security Alert: Only SELECT queries are allowed."}
         
-        for word in forbidden_keywords:
+        for word in FORBIDDEN_SQL_KEYWORDS:
             if word in clean_query:
                 return {"sql_error": f"Security Alert: Forbidden keyword '{word}' detected."}
 

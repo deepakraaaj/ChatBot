@@ -24,18 +24,19 @@ class GeminiSettings(BaseSettings):
     model_config = settings_config
 
 class SelfHostedSettings(BaseSettings):
-    base_url: str = Field("http://localhost:8000/v1", alias="SELF_HOSTED_BASE_URL")
+    base_url: str = Field("http://localhost:8001/v1", alias="SELF_HOSTED_BASE_URL")
     api_key: str = Field("none", alias="SELF_HOSTED_API_KEY")
     default_model: str = Field("qwen2.5:0.5b", alias="SELF_HOSTED_DEFAULT_MODEL")
 
     model_config = settings_config
 
 class LLMSettings(BaseSettings):
-    primary_provider: str = Field("groq", alias="LLM_PRIMARY_PROVIDER")
-    fallback_provider: str = Field("gemini", alias="LLM_FALLBACK_PROVIDER")
+    primary_provider: str = Field("self_hosted", alias="LLM_PRIMARY_PROVIDER")
+    fallback_provider: str = Field("groq", alias="LLM_FALLBACK_PROVIDER")
     production_provider: str = Field("self_hosted", alias="LLM_PRODUCTION_PROVIDER")
     sql_provider: str = Field("groq", alias="LLM_SQL_PROVIDER")
     embedding_provider: str = Field("local", alias="EMBEDDING_PROVIDER")
+    embedding_model: str = Field("sentence-transformers/all-MiniLM-L6-v2", alias="EMBEDDING_MODEL_NAME")
     
     understanding_model: str = Field("llama-3.3-70b-versatile", alias="LLM_UNDERSTANDING_MODEL")
     reply_model: str = Field("llama-3.3-70b-versatile", alias="LLM_REPLY_MODEL")
@@ -61,11 +62,23 @@ class AppSettings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     db: DatabaseSettings = Field(default_factory=DatabaseSettings)
     auth: "AuthSettings" = Field(default_factory=lambda: AuthSettings())
+    elasticsearch: "ElasticsearchSettings" = Field(default_factory=lambda: ElasticsearchSettings())
+    redis: "RedisSettings" = Field(default_factory=lambda: RedisSettings())
+
+    model_config = settings_config
+
+class ElasticsearchSettings(BaseSettings):
+    url: str = Field("http://elasticsearch:9200", alias="ELASTICSEARCH_URL")
+    
+    model_config = settings_config
+
+class RedisSettings(BaseSettings):
+    url: str = Field("redis://redis:6379", alias="REDIS_URL")
 
     model_config = settings_config
 
 class AuthSettings(BaseSettings):
-    secret_key: str = Field("09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7", alias="SECRET_KEY")
+    secret_key: str = Field("dev_secret_key_change_in_prod", alias="SECRET_KEY")
     algorithm: str = Field("HS512", alias="ALGORITHM")
     access_token_expire_minutes: int = Field(30, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
     

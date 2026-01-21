@@ -6,8 +6,7 @@ from app.core.settings import settings
 from app.core.logging import setup_logging
 from app.api.schemas import ChatRequest, ChatResponse, WorkflowResponse, SQLResponse, ToonMetrics
 from app.graph.main import app_graph
-from app.toon.codec import toon_codec
-from app.vector.store import vector_store
+from app.core.codec import toon_codec
 from langchain_core.messages import HumanMessage
 import uuid
 import logging
@@ -16,6 +15,14 @@ import json
 from fastapi.responses import StreamingResponse
 from app.core.observability import TraceManager
 from app.core.guardrails import Guardrails, SafetyViolation
+from app.core.es import ElasticsearchClient
+from app.core.cache import CacheClient
+from app.services.history import HistoryService
+from app.services.vector import VectorService
+from app.services.user_context import UserContextService
+from app.services.workflow_state import WorkflowStateService
+from app.services.metrics import MetricsService
+from contextlib import asynccontextmanager
 
 # Setup
 setup_logging()
@@ -31,7 +38,36 @@ from app.api.deps import get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
 
-app = FastAPI(title="Facility Ops Assistant", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Ensure ES index exists
+    try:
+        await ElasticsearchClient.create_index("chat_history", mapping={
+            "mappings": {
+                "properties": {
+                    "session_id": {"type": "keyword"},
+                    "role": {"type": "keyword"},
+                    "content": {"type": "text"},
+                    "user_id": {"type": "keyword"},
+                    "timestamp": {"type": "date"}
+                }
+            }
+        })
+        # Ensure Vector Index
+        await VectorService.ensure_index()
+        
+        # Trigger Redis init
+        CacheClient.get_client()
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
+    
+    yield
+    
+    # Shutdown
+    await ElasticsearchClient.close()
+    await CacheClient.close()
+
+app = FastAPI(title="Facility Ops Assistant", version="1.0.0", lifespan=lifespan)
 
 # Security & CORS
 # In production, this should be set to specific origins via settings.
@@ -109,37 +145,30 @@ async def health_check():
 
 @app.get("/metrics/sql")
 async def sql_metrics(current_user: Annotated[User, Depends(get_current_user)]):
-    # Placeholder for SQL Cache metrics
-    return {"hits": 10, "misses": 2, "avg_latency_ms": 120}
-
-@app.post("/vector/demo")
-async def vector_demo(
-    current_user: Annotated[User, Depends(get_current_user)],
-    text: str = "This is a test document", 
-    query: str = "test"
-):
-# ... (vector demo continued)
-    """
-    Demo endpoint to verify ChromaDB integration.
-    """
     try:
-        doc_id = str(uuid.uuid4())
-        # Use user_id in metadata
-        vector_store.add_texts(
-            texts=[text], 
-            metadatas=[{"source": "demo", "user_id": str(current_user.id)}], 
-            ids=[doc_id]
-        )
-        results = vector_store.search(query=query, k=2)
+        # Example Redis check
+        info = await CacheClient.get_client().info()
         return {
-            "status": "success", 
-            "added_id": doc_id, 
-            "search_results": results,
-            "total_docs": vector_store.count()
+            "status": "connected", 
+            "redis_version": info.get("redis_version"), 
+            "used_memory_human": info.get("used_memory_human")
         }
     except Exception as e:
-        logger.error(f"Vector demo error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "detail": str(e)}
+
+@app.get("/metrics/analytics")
+async def get_analytics(hours: float = 1.0):
+    """
+    Expose aggregated metric data for the Streamlit dashboard.
+    """
+    try:
+        data = await MetricsService.get_aggregates(hours_back=hours)
+        return {"status": "ok", "data": data}
+    except Exception as e:
+        logger.error(f"Analytics fetch error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch analytics")
+
+# Vector demo endpoint removed
 
 @app.post("/chat")
 async def chat_endpoint(
@@ -147,7 +176,7 @@ async def chat_endpoint(
     request: Request,
     current_user: Annotated[User, Depends(get_current_user)]
 ):
-    print(f"DEBUG: Received chat request: {chat_request} from user {current_user.email}")
+    logger.info(f"Received chat request from user {current_user.email} (session: {chat_request.session_id})")
     
     # 1. Guardrails Input Check
     is_safe, violation = Guardrails.validate_input(chat_request.message)
@@ -165,101 +194,19 @@ async def chat_endpoint(
     chat_request.user_id = str(current_user.id)
     
     try:
-        # 1. Load Chat History (Hybrid: Recent + Relevant)
-        history_messages = []
-        
-        # A. Short-Term Memory: Fetch last 4 messages from SQL (Try/Except for Stateless)
-        try:
-            async with AsyncSessionLocal() as session:
-                stmt = select(ChatHistory).where(ChatHistory.session_id == chat_request.session_id).order_by(ChatHistory.created_at.desc()).limit(4)
-                result = await session.execute(stmt)
-                recent_records = result.scalars().all()
-                recent_records.reverse() # Chronological
-        except Exception as e:
-            logger.warning(f"DB History load failed (stateless mode): {e}")
-            recent_records = []
-            
-        # B. Long-Term Memory: Fetch relevant past messages via Vector Search
-        relevant_docs = []
-        try:
-            search_results = vector_store.search(
-                query=chat_request.message, 
-                k=3, 
-                filter={"session_id": chat_request.session_id}
-            )
-            for res in search_results:
-                relevant_docs.append(res)
-        except Exception as e:
-            logger.warning(f"Vector search failed (ignoring): {e}")
-
-        # C. Combine & Deduplicate
-        seen_contents = set()
-        final_history_objects = []
-
-        # Add Relevant first (History)
-        for doc in relevant_docs:
-            content = doc["text"]
-            role = doc["metadata"].get("role", "user")
-            if content not in seen_contents:
-                seen_contents.add(content)
-                if role == "user":
-                    final_history_objects.append(HumanMessage(content=content))
-                else:
-                    final_history_objects.append(AIMessage(content=content))
-
-        # Add Recent (Immediate Context)
-        for record in recent_records:
-            if record.content not in seen_contents:
-                seen_contents.add(record.content)
-                if record.role == "user":
-                    final_history_objects.append(HumanMessage(content=record.content))
-                elif record.role == "assistant":
-                    final_history_objects.append(AIMessage(content=record.content))
-        
-        history_messages = final_history_objects
+        # 1. Load Chat History via Service
+        history_messages = await HistoryService.get_history(chat_request.session_id, chat_request.message)
 
         # Add current user message
         current_user_msg = HumanMessage(content=chat_request.message)
         history_messages.append(current_user_msg)
 
-        # 0. Lookup User's Company & Name
-        user_company_id = None
-        user_name = None
-        user_company_name = None
+        # 1.5 Load User Context & Workflow State (Parallelizable in future, mostly async db calls)
+        user_ctx = {}
         if chat_request.user_id:
-            async with AsyncSessionLocal() as session:
-                try:
-                    uid = int(chat_request.user_id) 
-                    query = text(f"""
-                        SELECT u.first_name, u.company_id, c.name as company_name 
-                        FROM `user` u 
-                        LEFT JOIN company c ON u.company_id = c.id 
-                        WHERE u.id = {uid}
-                    """)
-                    result = await session.execute(query)
-                    row = result.mappings().first()
-                    if row:
-                        user_company_id = str(row["company_id"])
-                        user_name = row["first_name"]
-                        user_company_name = row["company_name"]
-                except ValueError:
-                    pass 
+             user_ctx = await UserContextService.get_user_context(int(chat_request.user_id))
         
-        # 1.5 Load Workflow State
-        workflow_from_db = {}
-        try:
-            async with AsyncSessionLocal() as session:
-                stmt = select(WorkflowState).where(WorkflowState.session_id == chat_request.session_id)
-                result = await session.execute(stmt)
-                wf_state_record = result.scalars().first()
-                if wf_state_record and wf_state_record.active:
-                    workflow_from_db = {
-                        "workflow_name": wf_state_record.workflow_name,
-                        "workflow_step": wf_state_record.current_step,
-                        "workflow_context": wf_state_record.state_data or {}
-                    }
-        except Exception as e:
-            logger.warning(f"Workflow state load failed: {e}")
+        workflow_from_db = await WorkflowStateService.load_state(chat_request.session_id)
 
         # Prepare Graph Input
         initial_state = {
@@ -267,169 +214,40 @@ async def chat_endpoint(
             "session_id": chat_request.session_id,
             "user_id": chat_request.user_id,
             "user_role": chat_request.user_role,
-            "user_name": user_name,
-            "company_id": user_company_id,
-            "company_name": user_company_name,
+            "user_role": chat_request.user_role,
+            "user_name": user_ctx.get("user_name"),
+            "company_id": user_ctx.get("company_id"),
+            "company_name": user_ctx.get("company_name"),
             "trace_id": request.state.trace_id,
             **workflow_from_db 
         }
 
-        # STREAMING SETUP
-        from app.core.streaming import StreamQueueHandler
+        # STREAMING MANAGER
+        from app.core.streaming import ChatStreamManager
         import asyncio
         
         queue = asyncio.Queue()
-        handler = StreamQueueHandler(queue)
-        config = {"callbacks": [handler]}
         
-        async def run_graph():
-            try:
-                final_state = await app_graph.ainvoke(initial_state, config=config)
-                return final_state
-            except Exception as e:
-                logger.error(f"Graph execution error: {e}", exc_info=True)
-                await queue.put(f"[ERROR: {str(e)}]")
-                return None
-            finally:
-                await queue.put(None) # Sentinel
+        request_info = {
+            "session_id": chat_request.session_id,
+            "user_id": chat_request.user_id,
+            "user_role": chat_request.user_role,
+            "message": chat_request.message,
+            "trace_id": request.state.trace_id
+        }
+        
+        manager = ChatStreamManager(
+            app_graph=app_graph,
+            initial_state=initial_state,
+            queue=queue,
+            request_info=request_info
+        )
 
-        task = asyncio.create_task(run_graph())
-
-        async def stream_generator():
-            full_response_text = ""
-            
-            # 1. Stream Tokens
-            while True:
-                token = await queue.get()
-                if token is None:
-                    break
-                full_response_text += token
-                # Yield token event
-                yield json.dumps({"type": "token", "content": token}) + "\n"
-            
-            # 2. Wait for Final State
-            final_state = await task
-            if not final_state:
-                # Error happened
-                yield json.dumps({"type": "error", "message": "Processing failed"}) + "\n"
-                return
-
-            # 3. Post-Processing & DB Save
-            try:
-                async with AsyncSessionLocal() as session:
-                    # Save User Message
-                    user_msg_db = ChatHistory(
-                        session_id=chat_request.session_id,
-                        role="user",
-                        user_id=chat_request.user_id,
-                        user_role=chat_request.user_role,
-                        content=chat_request.message,
-                        trace_id=request.state.trace_id
-                    )
-                    session.add(user_msg_db)
-                    
-                    # Save AI Response (Aggregated)
-                    # Fallback if streaming was empty but final_response is set (e.g. non-streaming node)
-                    if not full_response_text and final_state.get("final_response"):
-                        full_response_text = final_state.get("final_response")
-                        # Yield it as one chunk if missed
-                        yield json.dumps({"type": "token", "content": full_response_text}) + "\n"
-
-                    ai_msg_db = ChatHistory(
-                        session_id=chat_request.session_id,
-                        role="assistant",
-                        user_id=chat_request.user_id,
-                        user_role=chat_request.user_role, 
-                        content=full_response_text,
-                        trace_id=request.state.trace_id
-                    )
-                    session.add(ai_msg_db)
-                    
-                    # Save/Update Workflow State
-                    if final_state.get("workflow_name"):
-                         stmt = select(WorkflowState).where(WorkflowState.session_id == chat_request.session_id)
-                         result = await session.execute(stmt)
-                         wf_record = result.scalars().first()
-                         
-                         is_active = final_state.get("workflow_step") != "end"
-                         
-                         if wf_record:
-                             wf_record.workflow_name = final_state.get("workflow_name")
-                             wf_record.current_step = final_state.get("workflow_step")
-                             wf_record.state_data = final_state.get("workflow_context")
-                             wf_record.active = is_active
-                         else:
-                             wf_record = WorkflowState(
-                                 session_id=chat_request.session_id,
-                                 workflow_name=final_state.get("workflow_name"),
-                                 current_step=final_state.get("workflow_step"),
-                                 state_data=final_state.get("workflow_context"),
-                                 active=is_active
-                             )
-                             session.add(wf_record)
-
-                    await session.commit()
-            except Exception as e:
-                logger.error(f"DB Save failed (stateless mode): {e}")
-                
-                # Save to Vector Store
-                try:
-                    vector_store.add_texts(
-                        texts=[chat_request.message, full_response_text],
-                        metadatas=[
-                            {"role": "user", "session_id": chat_request.session_id, "timestamp": str(time.time()), "user_id": str(chat_request.user_id)},
-                            {"role": "assistant", "session_id": chat_request.session_id, "timestamp": str(time.time()), "user_id": str(chat_request.user_id)}
-                        ]
-                    )
-                except Exception as ve:
-                    logger.error(f"Failed to save to vector store: {ve}")
-            
-            # 4. Yield Structured Data (Workflow, SQL, etc.)
-            wf_resp = None
-            if final_state.get("workflow_name"):
-                wf_data = final_state.get("workflow_data", {})
-                wf_resp = {
-                    "active": final_state.get("workflow_step") != "end",
-                    "name": final_state.get("workflow_name"),
-                    "step": final_state.get("workflow_step"),
-                    "view": wf_data
-                }
-
-            sql_resp = None
-            if final_state.get("sql_query"):
-                res = final_state.get("sql_result")
-                sql_resp = {
-                    "ran": res is not None,
-                    "cached": False, 
-                    "query": final_state.get("sql_query"),
-                    "row_count": len(res) if res else 0,
-                    "rows_preview": res if res else [] 
-                }
-
-            toon_metrics = None
-            if sql_resp and sql_resp["rows_preview"]:
-                toon_encoded = toon_codec.encode(sql_resp["rows_preview"])
-                toon_metrics = toon_encoded["toon_meta"]
-            else:
-                toon_metrics = {"raw_tokens": 0, "toon_tokens": 0, "reduction_pct": 0.0}
-
-            final_data = {
-                "type": "result",
-                "session_id": chat_request.session_id,
-                "status": "ok",
-                "labels": [final_state.get("intent") or "unknown"],
-                "workflow": wf_resp,
-                "sql": sql_resp,
-                "toon": toon_metrics,
-                "provider_used": final_state.get("provider_used") or "unknown",
-                "trace_id": request.state.trace_id
-            }
-            yield json.dumps(final_data) + "\n"
-
-        return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+        return StreamingResponse(manager.generator(), media_type="application/x-ndjson")
+        
 
     except Exception as e:
-        print(f"DEBUG: Chat endpoint exception: {e}")
+        logger.error(f"Chat endpoint exception: {e}")
         logger.error(f"Chat endpoint error: {e}", exc_info=True)
         # Fallback error response (can't stream if we haven't started, or if exception happens early)
         return ChatResponse(

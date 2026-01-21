@@ -5,8 +5,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.embeddings import Embeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from app.core.settings import settings
+from app.core.settings import settings
 from app.llm.client import LLMClient
 import httpx
+from functools import lru_cache
 
 class SelfHostedClient(LLMClient):
     def get_chat_model(self, model_name: Optional[str] = None, temperature: float = 0.7) -> BaseChatModel:
@@ -17,9 +19,10 @@ class SelfHostedClient(LLMClient):
             temperature=temperature
         )
 
+    @lru_cache(maxsize=1)
     def get_embeddings(self) -> Embeddings:
          # Assuming local execution means local embeddings are preferred
-        return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        return HuggingFaceEmbeddings(model_name=settings.llm.embedding_model)
 
     async def check_health(self) -> bool:
         try:

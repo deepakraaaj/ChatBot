@@ -4,59 +4,45 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.output_parsers import StrOutputParser
 from app.llm.router import llm_router
 from app.graph.state import GraphState
+from app.core.prompts import REPLY_SYSTEM_PROMPT
 import logging
 import json
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 class ReplyNode:
     def __init__(self):
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are a helpful facility operations assistant.
-You have processed a user request and now need to provide the final response.
-
-User Context:
-- Name: {user_name}
-- Role: {user_role}
-- Company: {company_name}
-
-Context:
-- Intent: {intent}
-- SQL Query: {sql_query}
-- SQL Result: {sql_result}
-- SQL Error: {sql_error}
-- Workflow Step: {workflow_step}
-- Error: {error}
-
-Instructions:
-1. Address the user by name ({user_name}) if creating a greeting.
-2. **Data Summary**:
-   - IF valid SQL Results exist: Provide a concise summary (e.g., "Found 15 tasks...", "3 facilities are overdue..."). Mention key trends.
-   - IF NO SQL Results: DO NOT mention "I didn't receive any SQL result". Just proceed with the conversation or ask for clarification naturally.
-3. **Errors**:
-   - IF there is a specific 'Error' or 'SQL Error': Explain it simply and user-friendly (e.g. "I couldn't find that data").
-   - IF no error: Do NOT mention technical statuses.
-4. Chat: Respond naturally and professionally.
-5. Workflow: Guide the user through the process if active.
-
-CRITICAL STYLE GUIDELINES:
-- **HIDE INTERNALS**: Never mention "SQL", "Database", "Query", or "JSON" unless the user is technical.
-- **NATURAL FLOW**: If a tool returned nothing, don't complain. Just ask the user for what you need to find it (e.g. "Could you specify which project?").
-- **IDs**: NEVER user internal IDs. Use names.
-- If the user asks about their company, say the Company Name ("{company_name}"), NOT the ID.
-
-Be concise, professional, and helpful.
-"""),
+            ("system", REPLY_SYSTEM_PROMPT),
             ("user", "{input}")
         ])
 
     async def __call__(self, state: GraphState, config: RunnableConfig) -> GraphState:
         try:
+            # [SHORT-CIRCUIT] If a heuristic node (Understanding) already set the final response, 
+            # we respect it and return immediately. This is critical for Help/Cancel/Greetings.
+            if state.get("final_response"):
+                logger.info("ReplyNode: final_response already set, bypassing LLM generation.")
+                return {
+                    "final_response": state["final_response"],
+                    "provider_used": state.get("provider_used", "heuristic")
+                }
+
             message = state["messages"][-1].content
             model, provider = await llm_router.get_chat_model("reply")
             
             chain = self.prompt | model | StrOutputParser()
             
+            # Extract workflow instruction
+            # Only include instruction if a workflow is actually active
+            workflow_instruction = ""
+            workflow_options = []
+            if state.get("workflow_name") and state.get("workflow_data") and "payload" in state["workflow_data"]:
+                payload = state["workflow_data"]["payload"]
+                workflow_instruction = payload.get("text", "")
+                workflow_options = payload.get("options", [])
+
             # Prepare context for the prompt
             context = {
                 "user_name": state.get("user_name", "User"),
@@ -67,8 +53,11 @@ Be concise, professional, and helpful.
                 "sql_result": str(state.get("sql_result", "")), # Convert list/dict to string
                 "sql_error": state.get("sql_error"),
                 "workflow_step": state.get("workflow_step"),
+                "workflow_instruction": workflow_instruction,
+                "workflow_options": ", ".join(workflow_options) if workflow_options else None,
                 "error": state.get("error"),
-                "input": message
+                "input": message,
+                "current_time": (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%d %I:%M %p")
             }
             
             response = await chain.ainvoke(context, config=config)

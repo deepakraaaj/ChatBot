@@ -36,40 +36,65 @@ async def get_current_user(
             
             if user:
                 return user
-        except Exception:
+            
+        except Exception as e:
+            print(f"DEBUG: Bypass logic error: {e}")
             pass # Fall through to normal auth if bypass extraction fails
             
+    print(f"DEBUG: Validating token: {token[:20]}...")
     try:
         # fits-service uses Base64 encoded secret for HMAC
         try:
+            print(f"DEBUG: Attempting to base64 decode secret key: {settings.auth.secret_key[:5]}...")
             secret_bytes = base64.b64decode(settings.auth.secret_key)
-        except Exception:
+            print("DEBUG: Secret key decoded successfully.")
+        except Exception as e:
             # Fallback if secret is not valid base64 (e.g. dev plain text)
+            print(f"DEBUG: Failed to decode secret key as base64: {e}. Using raw string.")
             secret_bytes = settings.auth.secret_key
 
+        print(f"DEBUG: Decoding JWT with algorithm: {settings.auth.algorithm}")
         payload = jwt.decode(token, secret_bytes, algorithms=[settings.auth.algorithm])
+        print(f"DEBUG: Decoded payload: {payload}")
         
         # 'sub' is the username/email in fits-service
         email = payload.get("sub")
+        print(f"DEBUG: Extracted email (sub): {email}")
         
         if email is None:
+            print("DEBUG: Email claim is missing.")
             raise credentials_exception
             
         # Optional: Extract other claims if needed for context
-        # user_id_claim = payload.get("userId")
-        # if user_id_claim:
-        #     decoded_id_str = base64.b64decode(user_id_claim).decode('utf-8')
-        #     user_id = int(decoded_id_str)
+        user_id = None
+        user_id_claim = payload.get("userId")
+        print(f"DEBUG: Extracted userId claim: {user_id_claim}")
+        if user_id_claim:
+            try:
+                decoded_id_str = base64.b64decode(user_id_claim).decode('utf-8')
+                user_id = int(decoded_id_str)
+                print(f"DEBUG: Decoded userId: {user_id}")
+            except Exception as e:
+                 print(f"DEBUG: Failed to decode userId claim: {e}")
 
-    except (JWTError, ValueError):
+    except (JWTError, ValueError) as e:
+        print(f"DEBUG: JWT Decode Error: {e}")
         raise credentials_exception
     
     # Check if user exists in DB using EMAIL (sub)
     try:
-        stmt = select(User).where(User.email == email)
+        if user_id:
+             print(f"DEBUG: Looking up user by ID: {user_id}")
+             stmt = select(User).where(User.id == user_id)
+        else:
+             print(f"DEBUG: Looking up user by Email: {email}")
+             stmt = select(User).where(User.email == email)
+             
         result = await db.execute(stmt)
         user = result.scalars().first()
-    except Exception:
+        print(f"DEBUG: User lookup result: {user}")
+    except Exception as e:
+        print(f"DEBUG: DB Lookup Error: {e}")
         # DB error or not found
         user = None
 

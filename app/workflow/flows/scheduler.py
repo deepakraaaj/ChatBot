@@ -111,7 +111,14 @@ class SchedulerWorkflow(BaseWorkflow):
                 "view": {
                     "type": "end",
                     "payload": {
-                        "text": f"Schedule created successfully! Assigned to {context.get('selected_assignee_name')} for {context.get('estimate_duration')} mins."
+                        "text": (
+                            f"**Schedule Created Successfully**\n"
+                            f"- Slot: {context.get('selected_slot_name')}\n"
+                            f"- Facility: {context.get('selected_facility_name')}\n"
+                            f"- Task: {context.get('selected_task_name')}\n"
+                            f"- Assignee: {context.get('selected_assignee_name')}\n"
+                            f"- Duration: {context.get('estimate_duration')} mins"
+                        )
                     }
                 }
             }
@@ -151,6 +158,8 @@ class SchedulerWorkflow(BaseWorkflow):
         if has_more:
             option_labels.append("More")
         
+        option_labels.append("Cancel")
+        
         return {
             "workflow_step": "select_slot",
             "context": context,
@@ -176,6 +185,7 @@ class SchedulerWorkflow(BaseWorkflow):
         
         context["facility_options"] = options
         option_labels = list(options.keys())
+        option_labels.append("Cancel")
         
         return {
             "workflow_step": "select_facility",
@@ -207,6 +217,7 @@ class SchedulerWorkflow(BaseWorkflow):
 
         context["task_options"] = options
         option_labels = list(options.keys())
+        option_labels.append("Cancel")
 
         return {
             "workflow_step": "select_task",
@@ -237,6 +248,7 @@ class SchedulerWorkflow(BaseWorkflow):
 
         context["assignee_options"] = options
         option_labels = list(options.keys())
+        option_labels.append("Cancel")
 
         return {
             "workflow_step": "select_assignee",
@@ -273,14 +285,22 @@ class SchedulerWorkflow(BaseWorkflow):
 
             async with AsyncSessionLocal() as session:
                  async with session.begin():
-                     sql_query = text(f"""
+                     sql_query = text("""
                         INSERT INTO task_transaction 
                         (status, priority, remarks, assigned_user_id, facility_id, company_id, date_created)
                         VALUES 
-                        (0, 1, '{remarks}', {aid}, {fid}, {company_id}, NOW())
+                        (:status, :priority, :remarks, :aid, :fid, :company_id, NOW())
                      """)
-                     logger.info(f"Executing SQL: {sql_query}")
-                     await session.execute(sql_query)
+                     params = {
+                         "status": 0,
+                         "priority": 1,
+                         "remarks": remarks,
+                         "aid": aid,
+                         "fid": fid,
+                         "company_id": company_id
+                     }
+                     logger.info(f"Executing SQL with params: {params}")
+                     await session.execute(sql_query, params)
             
             logger.info("Schedule successfully written to DB.")
 

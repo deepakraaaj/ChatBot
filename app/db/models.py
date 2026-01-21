@@ -60,3 +60,17 @@ class User(Base):
     # Context
     company_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column("date_created", DateTime(timezone=True), server_default=func.now())
+
+class UsageMetric(Base):
+    __tablename__ = "usage_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    user_role: Mapped[str] = mapped_column(String(50), nullable=False)
+    feature: Mapped[str] = mapped_column(String(100), nullable=False) # chat, sql, workflow
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[float] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="ok")
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
