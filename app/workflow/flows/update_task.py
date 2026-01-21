@@ -42,7 +42,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
                 "view": {
                     "type": "menu",
                     "payload": {
-                        "text": f"Update status for '{selected_task['name']}':",
+                        "text": f"Got it! What's the new status for '{selected_task['name']}'?",
                         "options": ["Pending", "In Progress", "Completed", "Cancel"]
                     }
                 }
@@ -73,7 +73,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
                 "view": {
                     "type": "menu",
                     "payload": {
-                        "text": f"Confirm updating '{context['selected_task_name']}' to '{status}'?",
+                        "text": f"Perfect! Just to confirm - I'll update '{context['selected_task_name']}' to '{status}'. Is that correct?",
                         "options": ["Confirm", "Cancel"]
                     }
                 }
@@ -89,7 +89,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
                     "view": {
                         "type": "end",
                         "payload": {
-                            "text": f"Task '{context['selected_task_name']}' updated to {context['new_status']}."
+                            "text": f"✅ Done! I've updated '{context['selected_task_name']}' to {context['new_status']}. Anything else I can help with?"
                         }
                     }
                 }
@@ -99,7 +99,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
                     "view": {
                         "type": "end",
                         "payload": {
-                            "text": "Update cancelled."
+                            "text": "No problem! Update cancelled. Let me know if you need anything else."
                         }
                     }
                 }
@@ -149,7 +149,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
                 "view": {
                     "type": "end",
                     "payload": {
-                        "text": f"No active tasks found for you (User {user_id})."
+                        "text": f"I couldn't find any active tasks assigned to you. Would you like me to help you with something else?"
                     }
                 }
              }
@@ -164,7 +164,7 @@ class UpdateTaskWorkflow(BaseWorkflow):
             "view": {
                 "type": "menu",
                 "payload": {
-                    "text": error if error else "Select a Task to Update:",
+                    "text": error if error else "I can help you update a task. Which one would you like to update?",
                     "options": option_labels
                 }
             }

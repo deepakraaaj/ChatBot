@@ -21,9 +21,13 @@ class SchedulerWorkflow(BaseWorkflow):
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         
-        # 0. Start -> Select Slot
+        # 0. Start -> Extract fields from initial input if provided, then select slot
         if not current_step:
             context["slot_offset"] = 0
+            # Try to extract any fields from the initial request
+            extracted = await self._extract_fields_from_input(user_input, company_id)
+            if extracted:
+                context.update(extracted)
             return await self._step_select_slot(company_id, context)
 
         # 1. Slot Selected -> Select Facility
@@ -91,9 +95,9 @@ class SchedulerWorkflow(BaseWorkflow):
                 "workflow_step": "capture_estimate",
                 "context": context,
                 "view": {
-                    "type": "input", # Just text prompt
+                    "type": "input",
                     "payload": {
-                        "text": "Enter estimated duration in minutes (e.g., 45):"
+                        "text": f"Almost done! How long do you estimate this will take? (in minutes)"
                     }
                 }
             }
@@ -112,12 +116,13 @@ class SchedulerWorkflow(BaseWorkflow):
                     "type": "end",
                     "payload": {
                         "text": (
-                            f"**Schedule Created Successfully**\n"
-                            f"- Slot: {context.get('selected_slot_name')}\n"
-                            f"- Facility: {context.get('selected_facility_name')}\n"
-                            f"- Task: {context.get('selected_task_name')}\n"
-                            f"- Assignee: {context.get('selected_assignee_name')}\n"
-                            f"- Duration: {context.get('estimate_duration')} mins"
+                            f"Perfect! I've created your schedule:\n\n"
+                            f"📅 **Slot:** {context.get('selected_slot_name')}\n"
+                            f"🏢 **Facility:** {context.get('selected_facility_name')}\n"
+                            f"✅ **Task:** {context.get('selected_task_name')}\n"
+                            f"👤 **Assigned to:** {context.get('selected_assignee_name')}\n"
+                            f"⏱️ **Duration:** {context.get('estimate_duration')} minutes\n\n"
+                            f"The schedule is now active. Is there anything else I can help you with?"
                         )
                     }
                 }
@@ -166,7 +171,7 @@ class SchedulerWorkflow(BaseWorkflow):
             "view": {
                 "type": "menu",
                 "payload": {
-                    "text": error if error else "Pick a scheduler slot:",
+                    "text": error if error else "I can help you create a schedule. Which time slot would you like?",
                     "options": option_labels
                 }
             }
@@ -193,7 +198,7 @@ class SchedulerWorkflow(BaseWorkflow):
             "view": {
                 "type": "menu",
                 "payload": {
-                    "text": error if error else "Select a Facility:",
+                    "text": error if error else f"Got it! Which facility is this for?",
                     "options": option_labels
                 }
             }
@@ -225,7 +230,7 @@ class SchedulerWorkflow(BaseWorkflow):
             "view": {
                 "type": "menu",
                 "payload": {
-                    "text": error if error else "Select a Task:",
+                    "text": error if error else f"Perfect! What task needs to be done at {context.get('selected_facility_name', 'this facility')}?",
                     "options": option_labels
                 }
             }
@@ -256,7 +261,7 @@ class SchedulerWorkflow(BaseWorkflow):
             "view": {
                 "type": "menu",
                 "payload": {
-                    "text": error if error else "Assign to user:",
+                    "text": error if error else f"Great! Who should handle '{context.get('selected_task_name', 'this task')}'?",
                     "options": option_labels
                 }
             }
@@ -269,6 +274,56 @@ class SchedulerWorkflow(BaseWorkflow):
             if k.lower() == user_input.lower():
                 return v
         return None
+
+    async def _extract_fields_from_input(self, user_input: str, company_id: str) -> Dict[str, Any]:
+        """
+        Intelligently extract fields from natural language input.
+        Example: "Create schedule for John to fix AC at Building A"
+        Extracts: assignee=John, task=fix AC, facility=Building A
+        """
+        extracted = {}
+        lower_input = user_input.lower()
+        
+        # Try to extract facility name
+        async with AsyncSessionLocal() as session:
+            try:
+                # Get all facilities for this company
+                res = await session.execute(text(f"SELECT id, name FROM facility WHERE company_id = {company_id} LIMIT 20"))
+                facilities = res.mappings().all()
+                
+                for fac in facilities:
+                    if fac["name"].lower() in lower_input:
+                        extracted["selected_facility_id"] = fac["id"]
+                        extracted["selected_facility_name"] = fac["name"]
+                        break
+                
+                # Try to extract assignee
+                res = await session.execute(text(f"SELECT id, first_name, last_name FROM user WHERE company_id = {company_id} AND is_active = 1 LIMIT 20"))
+                users = res.mappings().all()
+                
+                for user in users:
+                    full_name = f"{user['first_name']} {user['last_name'] or ''}".strip()
+                    first_name = user['first_name'].lower()
+                    
+                    if first_name in lower_input or full_name.lower() in lower_input:
+                        extracted["selected_assignee_id"] = user["id"]
+                        extracted["selected_assignee_name"] = full_name
+                        break
+                
+                # Try to extract task
+                res = await session.execute(text(f"SELECT id, name FROM task_description WHERE company_id = {company_id} LIMIT 20"))
+                tasks = res.mappings().all()
+                
+                for task in tasks:
+                    if task["name"].lower() in lower_input:
+                        extracted["selected_task_id"] = task["id"]
+                        extracted["selected_task_name"] = task["name"]
+                        break
+                        
+            except Exception as e:
+                logger.error(f"Error extracting fields: {e}")
+        
+        return extracted
 
     async def _write_schedule(self, user_id, company_id, context):
         try:
