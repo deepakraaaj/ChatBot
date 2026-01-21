@@ -36,6 +36,69 @@ docker ps --filter name=lightning_
 | **Database** | `lightning_db` | `3308` |
 | **Dashboard** | `lightning_dashboard` | `8501` |
 
+## 🏗️ System Architecture
+
+The following diagram illustrates the core components of the **LightningBot** system and how they interact:
+
+```mermaid
+graph TD
+    User([User / Client]) <--> API[FastAPI Backend]
+    
+    subgraph "Core Backend"
+        API <--> Graph[LangGraph Engine]
+        Graph <--> Nodes{Specialized Nodes}
+    end
+    
+    subgraph "Data & Search"
+        Nodes <--> ES[(Elasticsearch)]
+        Nodes <--> Redis[(Redis Cache)]
+        Nodes <--> DB[(MySQL / SQL DB)]
+    end
+    
+    subgraph "LLM Layer"
+        Nodes <--> Router[LLM Router]
+        Router <--> Groq[Groq API]
+        Router <--> Gemini[Gemini API]
+        Router <--> Local[Self-Hosted LLM]
+    end
+
+    classDef primary fill:#f9f,stroke:#333,stroke-width:2px;
+    classDef storage fill:#82b1ff,stroke:#333,stroke-width:2px;
+    classDef llm fill:#b2ff59,stroke:#333,stroke-width:2px;
+    
+    class ES,Redis,DB storage;
+    class Groq,Gemini,Local llm;
+```
+
+## 🔄 Request-Response Flow
+
+This sequence diagram shows how a user query is processed through the multi-agent graph with caching and vector search:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant A as API
+    participant G as Graph Engine
+    participant C as Redis Cache
+    participant V as Vector Service (ES)
+    participant L as LLM Provider
+
+    U->>A: Send Message
+    A->>G: Initialize Workflow State
+    G->>C: Check Cache for Query/Embedding
+    alt Cache Hit
+        C-->>G: Return Cached Data
+    else Cache Miss
+        G->>V: Perform Semantic Search
+        V-->>G: Return Context
+        G->>C: Cache Vector/Result
+    end
+    G->>L: Request Reasoning (with Context)
+    L-->>G: Return AI Response
+    G->>A: Finalize Response
+    A->>U: Return Response (Streaming/JSON)
+```
+
 ## 📂 Project Structure
 ```
 app/
@@ -47,4 +110,13 @@ app/
 ├── services/   # Lightning Vector Service 
 └── workflow/   # Workflow Engine
 ```
+
+## ❓ FAQ & Clarifications
+
+### What is the purpose of `lightning_db`?
+The `lightning_db` container in `docker-compose.yml` provides a local **MySQL** instance. 
+- **Local Development**: It serves as a dedicated environment for development and testing without requiring external infrastructure.
+- **Workflow State & Metadata**: While Elasticsearch handles vector search, the SQL database stores structured data, user contexts, and persistent workflow states.
+- **Managed Deployment**: If you have a remote `DATABASE_URL` configured in your `.env`, you can safely stop the `lightning_db` service. However, it's kept in the compose file to ensure the project is "ready-to-run" out of the box for anyone cloning the repo.
+
 
