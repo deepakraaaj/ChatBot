@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class IntentData(BaseModel):
     intent: str = Field(..., description="The classification of the user's intent. Must be one of: 'chat', 'sql', 'workflow'.")
     parameters: dict = Field(default_factory=dict, description="Any extracted parameters relevant to the intent.")
+    filters: dict = Field(default_factory=dict, description="Extracted metadata constraints (e.g. status, assignee).")
     reasoning: str = Field(..., description="Brief explanation of why this intent was chosen.")
 
 class UnderstandingNode:
@@ -34,13 +35,17 @@ class UnderstandingNode:
                 "sql_result": None,
                 "sql_error": None,
                 "intent": None,
-                "parameters": {}
+                "parameters": {},
+                "search_filters": {} # Clear filters from previous turn
             }
             
             # Get the last message
             messages = state["messages"]
             last_message = messages[-1].content
-            lower_input = last_message.lower().strip()
+            
+            # Normalize: Lowercase and strip common punctuation for robust matching
+            import string
+            lower_input = last_message.lower().strip().strip(string.punctuation)
             
             # 1. [HEURISTIC: Priority Commands] - Help, Greetings, Cancellation
             # These ALWAYS take precedence over active workflows.
@@ -81,6 +86,39 @@ class UnderstandingNode:
                     "final_response": None, # Ensure we don't skip help workflow
                     "provider_used": "heuristic"
                 }
+                 return {**state_updates, **updates}
+
+            # 1b. [HEURISTIC: Common Workflows] - Speed Optimization
+            # Avoid LLM call for clear, exact commands
+            if "create" in lower_input and "schedule" in lower_input:
+                 logger.info("Heuristic: 'Create Schedule' detected.")
+                 return {
+                     **state_updates,
+                     "intent": "workflow",
+                     "parameters": {"workflow": "scheduler"},
+                     "workflow_name": "scheduler",
+                     "provider_used": "heuristic"
+                 }
+            
+            if "status" in lower_input and "update" in lower_input:
+                 logger.info("Heuristic: 'Update Status' detected.")
+                 return {
+                     **state_updates,
+                     "intent": "workflow",
+                     "parameters": {"workflow": "update_task"},
+                     "workflow_name": "update_task",
+                     "provider_used": "heuristic"
+                 }
+
+            # [HEURISTIC: Avoid Confusion] - Explicitly handle "Create Facility" or "Create Location"
+            if "create" in lower_input and ("facility" in lower_input or "location" in lower_input):
+                 logger.info("Heuristic: 'Create Facility' detected (Not Supported).")
+                 updates = {
+                     "intent": "chat", 
+                     "final_response": "I cannot create new facilities yet. I can only schedule tasks for existing facilities.",
+                     "workflow_name": None,
+                     "provider_used": "heuristic"
+                 }
                  return {**state_updates, **updates}
 
             # 2. [PAGINATION DETECTION]
@@ -156,6 +194,7 @@ class UnderstandingNode:
             updates = {
                 "intent": result["intent"],
                 "parameters": params,
+                "search_filters": result.get("filters", {}), # Capture filters
                 "workflow_name": mapped_wf_name, 
                 "provider_used": provider
             }

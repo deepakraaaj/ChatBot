@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional
 from sqlalchemy import text
 from app.db.session import AsyncSessionLocal
 from app.workflow.base import BaseWorkflow
+from app.services.vector import VectorService
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,13 @@ class SchedulerWorkflow(BaseWorkflow):
         # 2. Facility Selected -> Select Task
         if current_step == "select_facility":
             selected_facility = self._resolve_selection(user_input, context.get("facility_options", {}))
+            
+            # [IMPROVED] Fallback: Check Vector Store (Semantic Match)
             if not selected_facility:
-                return await self._step_select_facility(company_id, context, error="Invalid facility. Please select again.")
+                selected_facility = await self._resolve_facility_via_vector(user_input, company_id)
+
+            if not selected_facility:
+                return await self._step_select_facility(company_id, context, error="Invalid facility. Please select again (or try typing the name).")
             
             context["selected_facility_id"] = selected_facility["id"]
             context["selected_facility_name"] = selected_facility["name"]
@@ -117,11 +123,11 @@ class SchedulerWorkflow(BaseWorkflow):
                     "payload": {
                         "text": (
                             f"Perfect! I've created your schedule:\n\n"
-                            f"📅 **Slot:** {context.get('selected_slot_name')}\n"
-                            f"🏢 **Facility:** {context.get('selected_facility_name')}\n"
-                            f"✅ **Task:** {context.get('selected_task_name')}\n"
-                            f"👤 **Assigned to:** {context.get('selected_assignee_name')}\n"
-                            f"⏱️ **Duration:** {context.get('estimate_duration')} minutes\n\n"
+                            f"Slot: {context.get('selected_slot_name')}\n"
+                            f"Facility: {context.get('selected_facility_name')}\n"
+                            f"Task: {context.get('selected_task_name')}\n"
+                            f"Assigned to: {context.get('selected_assignee_name')}\n"
+                            f"Duration: {context.get('estimate_duration')} minutes\n\n"
                             f"The schedule is now active. Is there anything else I can help you with?"
                         )
                     }
@@ -319,6 +325,46 @@ class SchedulerWorkflow(BaseWorkflow):
                 return v
         
         return None
+
+    # --- Vector Resolution Helpers ---
+    async def _resolve_facility_via_vector(self, user_input, company_id):
+        """
+        Attempts to find a facility using Vector Search (Semantic Match).
+        """
+        try:
+             logger.info(f"Using Vector Search to resolve facility: '{user_input}'")
+             
+             # Search specifically for facilities (doc_type="facility")
+             # This requires that documents are indexed with 'doc_type' metadata.
+             filters = {
+                 "company_id": int(company_id),
+                 "doc_type": "facility" 
+             }
+             
+             results, _ = await VectorService.search(user_input, k=10, filter=filters)
+             
+             if not results:
+                 logger.warning("Vector search returned no results for facility resolution.")
+                 return None
+                 return None
+                 
+             for hit in results:
+                 meta = hit["metadata"]
+                 
+                 # Verify it's a facility (has facility_id)
+                 if "facility_id" in meta:
+                     logger.info(f"Vector Match Found: {meta.get('facility_name')} (Score: {hit.get('score')})")
+                     return {
+                         "id": meta["facility_id"], 
+                         "name": meta.get("facility_name")
+                     }
+                 
+             logger.warning("Top vector matches were not facilities (likely tasks).")
+             return None
+
+        except Exception as e:
+            logger.error(f"Vector Facility resolution failed: {e}")
+            return None
 
     async def _extract_fields_from_input(self, user_input: str, company_id: str) -> Dict[str, Any]:
         """

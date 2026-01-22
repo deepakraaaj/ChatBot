@@ -87,9 +87,17 @@ class VectorService:
             # 3. Optimized ES Filter Logic
             es_filter = None
             if filter:
-                must_clauses = [{"term": {f"metadata.{key}": val}} for key, val in filter.items()]
+                must_clauses = []
+                for key, val in filter.items():
+                    # Check for "assignee_name", "status" etc.
+                    # Support for list values (terms query)
+                    if isinstance(val, list):
+                        must_clauses.append({"terms": {f"metadata.{key}": val}})
+                    else:
+                        must_clauses.append({"term": {f"metadata.{key}": val}})
+                
                 if must_clauses:
-                    es_filter = {"bool": {"must": must_clauses}}
+                    es_filter = {"bool": {"filter": must_clauses}} # Use filter context (faster/cached)
 
             # 4. Perform Vector Search with pagination
             hits, total_hits = await ElasticsearchClient.vector_search(INDEX_NAME, query_vector, k, es_filter, offset)

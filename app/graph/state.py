@@ -45,5 +45,8 @@ class GraphState(TypedDict):
     last_query: Optional[str]  # Track the last search query for pagination
     pagination_offset: Optional[int]  # Current offset for pagination (default 0)
     has_more_results: Optional[bool]  # Flag indicating if more results exist
+    
+    # Hybrid Search Filters
+    search_filters: Optional[Dict[str, Any]]  # Metadata filters (status, date, type, etc.)
 
 

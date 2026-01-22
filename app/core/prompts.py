@@ -17,6 +17,9 @@ INTENTS:
    - KEYWORDS: "list", "show", "what are", "how many", "tasks", "work orders", "facilities", "status of".
    - CRITICAL: "Show more", "Next", "Pending tasks", "My tasks", "Recent completions summary" -> MUST BE 'sql'.
    - NEVER classify a read-only request (like "show tasks" or "recent summary") as 'workflow'.
+   - **METADATA EXTRACTION**:
+     - Check for constraints: Status (pending/active), Assignee (my/john's), Date (today/overdue), Type.
+     - You MUST extract these into 'filters' parameter if present.
 
 2. 'workflow': User wants to CREATE, UPDATE, or MODIFY something.
    - ACTIONS: "Create", "Assign", "Update", "Change", "Cancel task".

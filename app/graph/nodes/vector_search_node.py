@@ -31,23 +31,25 @@ class VectorSearchNode:
             logger.info(f"Vector Search Request: '{query}' (offset: {current_offset})")
             
             # 1. Prepare Filters (Hybrid Search)
-            # We automatically filter by company_id for security
             filters = {}
+            
+            # A. Security Filter (Company ID)
             if company_id:
                 filters["company_id"] = int(company_id)
             
-            # TODO: Advanced filter extraction (e.g. "my tasks" -> assignee_name check?)
-            # For now, we rely on Vector Semantic Match to handle "my tasks" mapping if the embedding is good.
-            # But strict ID filtering is better. 
-            
-            # Simple heuristic for "My Tasks"
-            if "my" in last_message.lower() and user_id:
-                # We can't easily filter by user_id in vector metadata unless we synced it.
-                # In SyncService we added 'assignee_name'. 
-                # Ideally we synced 'assigned_user_id' too.
-                # Let's check SyncService... we synced 'assignee_name' but not ID in metadata.
-                # Update: We only put names in metadata in my previous step.
-                pass 
+            # B. Intent Filters (from Understanding)
+            intent_filters = state.get("search_filters", {})
+            if intent_filters:
+                logger.info(f"Applying Intent Filters: {intent_filters}")
+                for key, val in intent_filters.items():
+                    # Special handling for 'assignee' = 'me'
+                    if key == "assignee" and val.lower() in ["me", "my", "mine"] and state.get("user_name"):
+                         # Approximate: filter by assignee_name containing user's first name
+                         # Ideally we use user_id if indexed. For now, let's try fuzzy match on name in VectorService or just text match
+                         # We'll pass it as 'assignee_name'
+                         filters["assignee_name"] = state.get("user_name").split()[0] # Heuristic: First name
+                    else:
+                        filters[key] = val
 
             # 2. Execute Search with pagination
             # K=PAGE_SIZE to retrieve one page at a time

@@ -1,6 +1,12 @@
 
 import asyncio
 import logging
+import os
+# Force offline usage for HuggingFace (use cached models)
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+# Also suppress symlink warnings
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
 from sqlalchemy import text
 from app.db.session import AsyncSessionLocal
 from app.services.sync import SyncService
@@ -16,27 +22,10 @@ async def bulk_sync():
     await VectorService.ensure_index()
     print("Index ensured.")
 
-    # 2. Fetch all Task IDs
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(text("SELECT id FROM task_transaction"))
-        task_ids = [row["id"] for row in result.mappings().all()]
-    
-    print(f"Found {len(task_ids)} tasks to sync.")
-    
-    # 3. Sync Each Task
-    success_count = 0
-    error_count = 0
-    
-    for i, tid in enumerate(task_ids):
-        try:
-            print(f"Syncing Task {i+1}/{len(task_ids)}: ID {tid}...", end="\r")
-            await SyncService.sync_task_to_es(tid)
-            success_count += 1
-        except Exception as e:
-            logger.error(f"\nFailed to sync Task ID {tid}: {e}")
-            error_count += 1
-    
-    print(f"\n--- Task Sync Complete: {success_count} succeeded, {error_count} failed ---")
+    # 2. Sync Tasks (Batched)
+    print("Syncing Tasks (Batched Mode)...")
+    await SyncService.sync_tasks_batched(batch_size=50)
+    print("Task Sync Complete.")
     
     # 4. Fetch all Facility IDs
     async with AsyncSessionLocal() as session:
