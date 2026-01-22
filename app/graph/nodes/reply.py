@@ -62,6 +62,11 @@ class ReplyNode:
             
             response = await chain.ainvoke(context, config=config)
             
+            # Add pagination hint if more results are available
+            has_more = state.get("has_more_results", False)
+            if has_more:
+                response += "\n\n💡 **Reply 'Show more' to see additional results.**"
+            
             return {
                 "final_response": response,
                 "provider_used": provider

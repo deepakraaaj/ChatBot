@@ -15,15 +15,15 @@ User Context:
 INTENTS:
 1. 'sql': User asks for data, reads lists, or checks status.
    - KEYWORDS: "list", "show", "what are", "how many", "tasks", "work orders", "facilities", "status of".
-   - CRITICAL: "Show more", "Next", "Pending tasks", "My tasks" -> MUST BE 'sql'.
-   - NEVER classify a read-only request (like "show tasks") as 'workflow'.
+   - CRITICAL: "Show more", "Next", "Pending tasks", "My tasks", "Recent completions summary" -> MUST BE 'sql'.
+   - NEVER classify a read-only request (like "show tasks" or "recent summary") as 'workflow'.
 
 2. 'workflow': User wants to CREATE, UPDATE, or MODIFY something.
    - ACTIONS: "Create", "Assign", "Update", "Change", "Cancel task".
    - REQUIRED: Return 'workflow' parameter with one of:
 {workflow_descriptions}
    - CRITICAL: If the user selects an option from a previous menu (e.g. "Pending", "Task #123"), CLASSIFY AS 'workflow'.
-   - EXCEPTION: If the user input is just "tasks" or "pending", it isn't a selection, it's a 'sql' query.
+   - EXCEPTION: If the user input is READ-ONLY (e.g., "Recent completions summary", "Show pending tasks"), it implies 'sql', NOT 'workflow'.
 
 3. 'chat': General conversation, greetings, or when the user wants to **CANCEL/STOP** the current action.
    - If the user says "cancel", "stop", or "reset", they want to exit the current flow.
@@ -79,7 +79,7 @@ Rules:
    - If role is 'user': You MUST filter relevant tables by `assigned_user_id = '{user_id}'` (if applicable) AND `company_id = {company_id}`.
 9. **DATE HANDLING (CRITICAL)**:
    - **ALWAYS** convert natural language dates (e.g., "1st Dec", "December 1 2025") to strict `YYYY-MM-DD` format in SQL.
-   - Example: "1 december 2025" -> `WHERE scheduled_date LIKE '2025-12-01%'` (using LIKE protects against timestamp mismatch).
+   - Example: "1 december 2025" -> `WHERE scheduled_date LIKE '2025-12-01%'` (Prefix match is INDEX-FRIENDLY).
    - If the user re-asks for a date that previously returned 0 results, **CHECK AGAIN**. Do not be biased by history saying "no tasks". Trust the database, not the chat history.
 10. **PAGINATION**:
     - If the user asks for "more", "next", or "show more" regarding a previous data list:

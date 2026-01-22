@@ -258,8 +258,15 @@ class UpdateTaskWorkflow(BaseWorkflow):
 
         async with AsyncSessionLocal() as session:
              async with session.begin():
-                 await session.execute(text(f"""
+                await session.execute(text(f"""
                     UPDATE task_transaction 
                     SET status = {status_int}, date_updated = NOW()
                     WHERE id = {task_id}
                  """))
+        
+        # [REALTIME SYNC]
+        try:
+            from app.services.sync import SyncService
+            await SyncService.sync_task_to_es(task_id)
+        except Exception as e:
+            logger.error(f"Failed to sync updated task {task_id}: {e}")

@@ -1,4 +1,3 @@
-
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from langchain_core.output_parsers import JsonOutputParser
@@ -84,7 +83,21 @@ class UnderstandingNode:
                 }
                  return {**state_updates, **updates}
 
-            # 2. [ACTIVE WORKFLOW BYPASS]
+            # 2. [PAGINATION DETECTION]
+            # If user says "show more", "next", etc., and we have pagination state, continue pagination
+            pagination_keywords = ["show more", "more", "next", "continue", "more results"]
+            has_pagination_state = state.get("last_query") and state.get("has_more_results")
+            
+            if any(keyword in lower_input for keyword in pagination_keywords) and has_pagination_state:
+                logger.info("Heuristic: Pagination request detected. Continuing with last query.")
+                return {
+                    "intent": "sql",  # Route to vector_search via sql intent
+                    "parameters": {},
+                    "provider_used": "heuristic"
+                    # Keep pagination_offset and last_query from state
+                }
+            
+            # 3. [ACTIVE WORKFLOW BYPASS]
             current_wf = state.get("workflow_name")
             current_step = state.get("workflow_step")
             
@@ -127,8 +140,17 @@ class UnderstandingNode:
             params = result.get("parameters", {})
             wb_param = params.get("workflow")
             
+            # [FIX] Robust Mapping for Workflow Names
+            if wb_param and isinstance(wb_param, str):
+                wb_param = wb_param.lower().strip()
+                # If exact match fails, try replacing spaces with underscores (common LLM behavior)
+                if wb_param not in INTENT_WORKFLOW_MAP and wb_param.replace(" ", "_") in INTENT_WORKFLOW_MAP:
+                    wb_param = wb_param.replace(" ", "_")
+            
             # Map Intent to Internal Workflow Name
             mapped_wf_name = INTENT_WORKFLOW_MAP.get(wb_param)
+            
+            logger.info(f"Workflow Mapping: Raw='{params.get('workflow')}' -> Normalized='{wb_param}' -> Mapped='{mapped_wf_name}'")
             
             # Create update dict
             updates = {
@@ -137,6 +159,13 @@ class UnderstandingNode:
                 "workflow_name": mapped_wf_name, 
                 "provider_used": provider
             }
+
+            # [FIX] Fallback for unmapped workflows
+            if updates["intent"] == "workflow" and not mapped_wf_name:
+                logger.warning(f"Intent is 'workflow' but mapping failed for param '{wb_param}'. Falling back to Help.")
+                updates["workflow_name"] = "help"
+                # We do NOT change intent to chat; we let it go to WorkflowNode which will run HelpWorkflow
+
             
             # Merge with our initial state_updates
             final_updates = {**state_updates, **updates}

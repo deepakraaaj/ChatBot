@@ -1,4 +1,3 @@
-
 import logging
 import hashlib
 from typing import List, Dict, Any
@@ -33,9 +32,10 @@ class VectorService:
         await ElasticsearchClient.create_index(INDEX_NAME, mapping)
 
     @staticmethod
-    async def add_texts(texts: List[str], metadatas: List[Dict[str, Any]] = None):
+    async def add_texts(texts: List[str], metadatas: List[Dict[str, Any]] = None, ids: List[str] = None):
         """
         Generates embeddings in batch and uses bulk indexing for speed.
+        If 'ids' provided, uses them as document IDs (allows updates).
         """
         if not texts:
             return
@@ -48,13 +48,18 @@ class VectorService:
             documents = []
             for i, text in enumerate(texts):
                 meta = metadatas[i] if metadatas else {}
-                documents.append({
+                doc = {
                     "content": text,
                     "metadata": meta,
                     "embedding": embeddings[i]
-                })
+                }
+                if ids and i < len(ids):
+                   doc["_id"] = str(ids[i])
+                
+                documents.append(doc)
             
             # Use High-Performance Bulk API
+            # Note: ElasticsearchClient.bulk_index needs to handle _id if present in doc
             success, failed = await ElasticsearchClient.bulk_index(INDEX_NAME, documents)
             logger.info(f"Successfully indexed {success} documents. Failed: {len(failed)}")
             
@@ -62,9 +67,10 @@ class VectorService:
             logger.error(f"Failed to add texts to vector index: {e}", exc_info=True)
 
     @staticmethod
-    async def search(query: str, k: int = 3, filter: dict = None) -> List[Dict]:
+    async def search(query: str, k: int = 3, filter: dict = None, offset: int = 0) -> tuple[List[Dict], int]:
         """
-        Highly optimized semantic search with embedding caching.
+        Highly optimized semantic search with embedding caching and pagination support.
+        Returns: (results, total_hits)
         """
         try:
             # 1. Check Cache for Embedding
@@ -85,11 +91,11 @@ class VectorService:
                 if must_clauses:
                     es_filter = {"bool": {"must": must_clauses}}
 
-            # 4. Perform Vector Search
-            hits = await ElasticsearchClient.vector_search(INDEX_NAME, query_vector, k, es_filter)
+            # 4. Perform Vector Search with pagination
+            hits, total_hits = await ElasticsearchClient.vector_search(INDEX_NAME, query_vector, k, es_filter, offset)
             
             # 5. Fast Response Mapping
-            return [
+            results = [
                 {
                     "text": hit['_source'].get("content"),
                     "metadata": hit['_source'].get("metadata", {}),
@@ -97,7 +103,8 @@ class VectorService:
                 }
                 for hit in hits
             ]
+            return results, total_hits
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}", exc_info=True)
-            return []
+            return [], 0

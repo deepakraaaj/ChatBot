@@ -383,6 +383,7 @@ class SchedulerWorkflow(BaseWorkflow):
 
             logger.info(f"Writing Schedule: User={user_id}, FID={fid}, TID={tid}, AID={aid}, Duration={duration}")
 
+            task_id = 0
             async with AsyncSessionLocal() as session:
                  async with session.begin():
                      sql_query = text("""
@@ -400,9 +401,16 @@ class SchedulerWorkflow(BaseWorkflow):
                          "company_id": company_id
                      }
                      logger.info(f"Executing SQL with params: {params}")
-                     await session.execute(sql_query, params)
+                     result = await session.execute(sql_query, params)
+                     task_id = result.lastrowid
             
-            logger.info("Schedule successfully written to DB.")
+            logger.info(f"Schedule successfully written to DB. New Task ID: {task_id}")
+            
+            # [REALTIME SYNC]
+            if task_id:
+                from app.services.sync import SyncService
+                # Fire and forget / await? Await is safer to ensure consistency message is true
+                await SyncService.sync_task_to_es(task_id)
 
         except Exception as e:
             logger.error(f"Failed to write schedule: {e}", exc_info=True)

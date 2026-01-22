@@ -47,7 +47,9 @@ class SQLExecutionNode:
         try:
             async with AsyncSessionLocal() as session:
                 # Primary Execution
-                result = await session.execute(text(query))
+                # Escape % for SQLAlchemy text() to avoid "missing parameter" error
+                safe_query = query.replace("%", "%%")
+                result = await session.execute(text(safe_query))
                 rows = result.mappings().all()
                 
                 # [ZERO HALLUCINATION STRATEGY]
@@ -56,7 +58,9 @@ class SQLExecutionNode:
                     relaxed_query = self._relax_query(query) # Pass original query (clean_query is lowercased)
                     if relaxed_query and relaxed_query != query:
                         logger.info(f"Zero results found. Retrying with relaxed query: {relaxed_query}")
-                        result = await session.execute(text(relaxed_query))
+                        # Escape % for SQLAlchemy text() to avoid "missing parameter" error
+                        safe_relaxed_query = relaxed_query.replace("%", "%%")
+                        result = await session.execute(text(safe_relaxed_query))
                         rows = result.mappings().all()
 
                 # Convert to list of dicts for JSON serialization

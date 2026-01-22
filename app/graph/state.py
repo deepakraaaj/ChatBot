@@ -40,5 +40,10 @@ class GraphState(TypedDict):
     company_name: Optional[str]
     trace_id: Optional[str]
     error: Optional[str]
+    
+    # Pagination for Vector Search
+    last_query: Optional[str]  # Track the last search query for pagination
+    pagination_offset: Optional[int]  # Current offset for pagination (default 0)
+    has_more_results: Optional[bool]  # Flag indicating if more results exist
 
 

@@ -8,3 +8,4 @@ venv/
 *.log
 logs/
 chroma_db/
+venv_new/

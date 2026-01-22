@@ -1,4 +1,3 @@
-
 import logging
 from typing import List, Dict, Any
 from elasticsearch import AsyncElasticsearch, helpers
@@ -43,10 +42,15 @@ class ElasticsearchClient:
         
         async def actions():
             for doc in documents:
-                yield {
+                action = {
                     "_index": index_name,
                     "_source": doc
                 }
+                # Support explicit ID if provided in doc (removed from source)
+                if "_id" in doc:
+                    action["_id"] = doc.pop("_id")
+                
+                yield action
 
         try:
             success, failed = await helpers.async_bulk(client, actions())
@@ -65,10 +69,10 @@ class ElasticsearchClient:
         return resp['hits']['hits']
 
     @classmethod
-    async def vector_search(cls, index_name: str, query_vector: list, k: int = 3, filter: dict = None):
+    async def vector_search(cls, index_name: str, query_vector: list, k: int = 3, filter: dict = None, offset: int = 0):
         """
-        Performs KNN search using vector/dense_vector field 'embedding'.
-        Optimized to return only necessary fields.
+        Performs KNN search using vector/dense_vector field 'embedding' with pagination support.
+        Returns: (hits, total_hits)
         """
         client = cls.get_client()
         if not await client.indices.exists(index=index_name):
@@ -88,13 +92,16 @@ class ElasticsearchClient:
             resp = await client.search(
                 index=index_name, 
                 knn=knn_query,
+                from_=offset,  # Pagination offset
+                size=k,  # Page size
                 source=["content", "metadata"],
                 _source_includes=["content", "metadata"] # Redundant but explicit for speed
             )
-            return resp['hits']['hits']
+            total_hits = resp['hits']['total']['value']
+            return resp['hits']['hits'], total_hits
         except Exception as e:
             logger.error(f"Vector search error: {e}")
-            return []
+            return [], 0
 
     @classmethod
     async def close(cls):

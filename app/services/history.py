@@ -1,4 +1,3 @@
-
 import logging
 import datetime
 from langchain_core.messages import HumanMessage, AIMessage
@@ -54,7 +53,7 @@ class HistoryService:
         relevant_docs = []
         try:
             if message:
-                search_results = await VectorService.search(
+                search_results, _ = await VectorService.search(
                     query=message, 
                     k=3, 
                     filter={"session_id": session_id}
